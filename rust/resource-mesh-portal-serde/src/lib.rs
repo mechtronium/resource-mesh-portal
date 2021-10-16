@@ -120,10 +120,10 @@ pub struct Command{
     pub payload: String
 }
 pub mod config {
-    use crate::{SchemaRef, ArtifactRef};
     use serde::{Serialize,Deserialize};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use crate::ArtifactRef;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Config {
@@ -322,6 +322,7 @@ pub mod incoming {
    }
 
     pub mod resource {
+        use serde::{Serialize,Deserialize};
         use crate::{Payload, State, Identifier, Key, Address};
         use crate::resource::{Archetype, ResourceStub};
 
