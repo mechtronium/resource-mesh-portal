@@ -122,7 +122,7 @@ pub struct Command{
 pub mod config {
     use serde::{Serialize,Deserialize};
     use std::collections::HashMap;
-    use std::sync::Arc;
+    
     use crate::ArtifactRef;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,9 +177,9 @@ pub mod config {
 
 pub mod outgoing {
     use serde::{Serialize,Deserialize};
-    use std::collections::HashMap;
-    use std::sync::Arc;
-    use crate::outgoing::http::HttpRequest;
+    
+    
+    
     use crate::config::BindConfig;
     use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel};
 
@@ -212,7 +212,7 @@ pub mod outgoing {
 
     pub mod resource {
         use serde::{Serialize,Deserialize};
-        use crate::{Payload, State, Identifier, Key, Address};
+        use crate::{State, Identifier};
         use crate::resource::Archetype;
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,7 +268,7 @@ pub mod outgoing {
 
 pub mod http{
         use serde::{Serialize,Deserialize};
-        use std::sync::Arc;
+        
         use std::collections::HashMap;
         use crate::Bin;
 
@@ -284,8 +284,8 @@ pub mod http{
 
 pub mod incoming {
     use serde::{Serialize,Deserialize};
-    use std::sync::Arc;
-    use std::collections::HashMap;
+    
+    
     use crate::config::BindConfig;
     use crate::{Identifier, Entity, ExchangeKind, ExchangeId, Signal, Port, CliId, BinParcel};
 
@@ -323,8 +323,8 @@ pub mod incoming {
 
     pub mod resource {
         use serde::{Serialize,Deserialize};
-        use crate::{Payload, State, Identifier, Key, Address};
-        use crate::resource::{Archetype, ResourceStub};
+        use crate::{State};
+        use crate::resource::{ResourceStub};
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
         pub enum ResourceEntity {
