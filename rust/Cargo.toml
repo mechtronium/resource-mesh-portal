@@ -2,5 +2,6 @@
 members = [
     "resource-mesh-portal-serde",
     "resource-mesh-portal-api-client",
+    "resource-mesh-portal-api-server",
 ]
 
