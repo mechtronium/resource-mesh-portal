@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use serde::{Serialize,Deserialize};
-use crate::outgoing::http::HttpRequest;
-use crate::resource::ResourceEntity;
 
 pub type Identifier=String;
 pub type ExchangeId =String;
@@ -56,15 +54,13 @@ pub mod resource {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Operation {
-    Resource(outgoing::resource::Operation),
+    Resource(mesh::enter::Operation),
     Ext(ExtOperation)
 }
 
-
-
 #[derive(Debug,Clone,Serialize, Deserialize)]
 pub enum ExtOperation {
-    Http(HttpRequest),
+    Http(http::HttpRequest),
     Port(PortRequest)
 }
 
@@ -90,7 +86,7 @@ pub enum Payload {
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Entity {
     Empty,
-    Resource(ResourceEntity),
+    Resource(resource::ResourceEntity),
     Payload(Payload)
 }
 
@@ -119,6 +115,7 @@ pub struct Command{
     pub cli: CliId,
     pub payload: String
 }
+
 pub mod config {
     use serde::{Serialize,Deserialize};
     use std::collections::HashMap;
@@ -174,167 +171,173 @@ pub mod config {
 
 }
 
-
-pub mod outgoing {
-    use serde::{Serialize,Deserialize};
-    
-    
-    
-    use crate::config::BindConfig;
-    use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel};
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub struct Request {
-        pub to: Vec<Identifier>,
-        pub operation: Operation,
-        pub kind: ExchangeKind,
-    }
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub struct Response {
-        pub to: Identifier,
-        pub exchange_id: ExchangeId,
-        pub signal: Signal,
-    }
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub enum Frame {
-        StartCli(CliId),
-        Command(Command),
-        EndCli(CliId),
-        Request(Request),
-        Response(Response),
-        GetBindConfig,
-        SetBindConfig(BindConfig),
-        SetStatus(Status),
-        BinParcel(BinParcel)
-    }
-
-    pub mod resource {
-        use serde::{Serialize,Deserialize};
-        use crate::{State, Identifier};
-        use crate::resource::Archetype;
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum Operation {
-            Create(Create),
-            Select(Selector),
-            Get,
-            Set(State),
-            Delete
-        }
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct Create {
-            pub parent: Identifier,
-            pub archetype: Archetype,
-            pub address: AddressSrc,
-            pub strategy: CreateStrategy,
-            pub state: StateSrc,
-        }
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum StateSrc {
-            Stateless,
-            State(State),
-            CreateArgs(String),
-        }
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum CreateStrategy {
-            Create,
-            CreateOrUpdate,
-            Ensure,
-        }
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum AddressSrc {
-            Append(String),
-            Pattern(String)
-        }
-
-
-        #[derive(Debug,Clone, Serialize, Deserialize)]
-        pub struct Selector {
-            meta: MetaSelector
-        }
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum MetaSelector {
-            None,
-            Name(String)
-        }
-    }
-
 pub mod http{
+    use serde::{Serialize,Deserialize};
+
+    use std::collections::HashMap;
+    use crate::Bin;
+
+    #[derive(Debug,Clone,Serialize,Deserialize)]
+    pub struct HttpRequest {
+        pub path: String,
+        pub headers: HashMap<String,String>,
+        pub body: Bin
+    }
+}
+
+pub mod mesh {
+    pub mod enter {
         use serde::{Serialize,Deserialize};
-        
-        use std::collections::HashMap;
-        use crate::Bin;
+
+        use crate::config::BindConfig;
+        use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel};
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
-        pub struct HttpRequest {
-            pub path: String,
-            pub headers: HashMap<String,String>,
-            pub body: Bin
+        pub struct Request {
+            pub to: Vec<Identifier>,
+            pub operation: Operation,
+            pub kind: ExchangeKind,
         }
+
+        #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub struct Response {
+            pub to: Identifier,
+            pub exchange_id: ExchangeId,
+            pub signal: Signal,
+        }
+
+        #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub enum Frame {
+            StartCli(CliId),
+            Command(Command),
+            EndCli(CliId),
+            Request(Request),
+            Response(Response),
+            GetBindConfig,
+            SetBindConfig(BindConfig),
+            SetStatus(Status),
+            BinParcel(BinParcel)
+        }
+
+        pub mod resource {
+            use serde::{Serialize,Deserialize};
+            use crate::{State, Identifier};
+            use crate::resource::Archetype;
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Operation {
+                Create(Create),
+                Select(Selector),
+                Get,
+                Set(State),
+                Delete
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub struct Create {
+                pub parent: Identifier,
+                pub archetype: Archetype,
+                pub address: AddressSrc,
+                pub strategy: CreateStrategy,
+                pub state: StateSrc,
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum StateSrc {
+                Stateless,
+                State(State),
+                CreateArgs(String),
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum CreateStrategy {
+                Create,
+                CreateOrUpdate,
+                Ensure,
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum AddressSrc {
+                Append(String),
+                Pattern(String)
+            }
+
+
+            #[derive(Debug,Clone, Serialize, Deserialize)]
+            pub struct Selector {
+                meta: MetaSelector
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum MetaSelector {
+                None,
+                Name(String)
+            }
+        }
+
+
     }
-}
 
-
-pub mod incoming {
-    use serde::{Serialize,Deserialize};
-    
-    
-    use crate::config::BindConfig;
-    use crate::{Identifier, Entity, ExchangeKind, ExchangeId, Signal, Port, CliId, BinParcel};
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub struct Request {
-        pub from: Identifier,
-        pub port: Port,
-        pub entity: Entity,
-        pub kind: ExchangeKind,
-    }
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub struct Response {
-        pub from: Identifier,
-        pub exchange_id: ExchangeId,
-        pub signal: Signal,
-    }
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub struct CommandOut{
-        pub cli: CliId,
-        pub payload: String
-    }
-
-    #[derive(Debug,Clone,Serialize,Deserialize)]
-    pub enum Frame {
-        StartCli(CliId),
-        Command(CommandOut),
-        EndCli(CliId),
-        Request(Request),
-        Response(Response),
-        BindConfig(BindConfig),
-        BinParcel(BinParcel)
-   }
-
-    pub mod resource {
+    pub mod exit {
         use serde::{Serialize,Deserialize};
-        use crate::{State};
-        use crate::resource::{ResourceStub};
 
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum ResourceEntity {
-            None,
-            Resource(ResourceStub),
-            Resources(Vec<ResourceStub>),
-            State(State)
+
+        use crate::config::BindConfig;
+        use crate::{Identifier, Entity, ExchangeKind, ExchangeId, Signal, Port, CliId, BinParcel};
+
+        #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub struct Request {
+            pub from: Identifier,
+            pub port: Port,
+            pub entity: Entity,
+            pub kind: ExchangeKind,
+        }
+
+        #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub struct Response {
+            pub from: Identifier,
+            pub exchange_id: ExchangeId,
+            pub signal: Signal,
+        }
+
+        #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub struct CommandOut{
+            pub cli: CliId,
+            pub payload: String
+        }
+
+        #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub enum Frame {
+            StartCli(CliId),
+            Command(CommandOut),
+            EndCli(CliId),
+            Request(Request),
+            Response(Response),
+            BindConfig(BindConfig),
+            BinParcel(BinParcel)
+        }
+
+        pub mod resource {
+            use serde::{Serialize,Deserialize};
+            use crate::{State};
+            use crate::resource::{ResourceStub};
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum ResourceEntity {
+                None,
+                Resource(ResourceStub),
+                Resources(Vec<ResourceStub>),
+                State(State)
+            }
         }
     }
 }
+
+
+
+
+
+
 
 
 #[cfg(test)]

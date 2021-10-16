@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "resource-mesh-portal-serde",
+    "resource-mesh-portal-api-client",
 ]
 

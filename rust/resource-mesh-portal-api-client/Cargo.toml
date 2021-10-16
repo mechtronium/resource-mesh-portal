@@ -1,0 +1,15 @@
+[package]
+name = "resource-mesh-portal-api-client"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+homepage ="http://starlane.io/"
+readme="README.md"
+repository = "https://github.com/mechtronium/resource-mesh-portal"
+description = "A client library for the Resource Mesh Portal API."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+resource-mesh-portal-serde = { path = "../resource-mesh-portal-serde", version= "0.0.1"}
+
