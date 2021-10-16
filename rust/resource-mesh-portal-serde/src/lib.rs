@@ -14,6 +14,7 @@ pub type Address=String;
 pub type CliId=String;
 pub type ArtifactRef=String;
 pub type Artifact=Arc<Vec<u8>>;
+pub type Port=String;
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Status {
@@ -24,6 +25,7 @@ pub enum Status {
 }
 
 pub mod resource {
+    use serde::{Serialize,Deserialize};
     use crate::{State, Identifier, Key, Address};
 
     #[derive(Debug,Clone, Serialize, Deserialize)]
@@ -54,71 +56,72 @@ pub mod resource {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Operation {
-    Resource(resource::Operation),
+    Resource(outgoing::resource::Operation),
     Ext(ExtOperation)
 }
 
 
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug,Clone,Serialize, Deserialize)]
 pub enum ExtOperation {
     Http(HttpRequest),
     Port(PortRequest)
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug,Clone,Serialize, Deserialize)]
 pub struct PortRequest {
    pub port: String,
    pub entity: Entity
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Bin {
     Raw(BinRaw),
     Src(BinSrc)
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Payload {
     Text(String),
     Bin(Bin),
     Bins(HashMap<String,Bin>)
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Entity {
     Empty,
     Resource(ResourceEntity),
     Payload(Payload)
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Signal {
     Ok(Entity),
     Error(String)
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum ExchangeKind {
     Notification,
     RequestResponse(ExchangeId)
 }
 
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct BinParcel{
     pub src: BinSrc,
     pub index: u32,
     pub raw: BinRaw
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct Command{
     pub cli: CliId,
     pub payload: String
 }
 pub mod config {
     use crate::{SchemaRef, ArtifactRef};
+    use serde::{Serialize,Deserialize};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -127,6 +130,7 @@ pub mod config {
         pub max_bin_size: u32,
         pub bin_parcel_size: u32
     }
+
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct SchemaRef {
@@ -172,28 +176,28 @@ pub mod config {
 
 
 pub mod outgoing {
-    use crate::{Identifier, Port, Error, ExchangeId, Signal, Entity, Payload, Bin, ExchangeKind, Command, Operation, CliId, ArtifactRef, Status, BinParcel};
+    use serde::{Serialize,Deserialize};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use std::convert::TryFrom;
     use crate::outgoing::http::HttpRequest;
     use crate::config::BindConfig;
+    use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel};
 
-    #[derive(Clone,Serialize,Deserialize)]
+    #[derive(Debug,Clone,Serialize,Deserialize)]
     pub struct Request {
         pub to: Vec<Identifier>,
         pub operation: Operation,
         pub kind: ExchangeKind,
     }
 
-    #[derive(Clone,Serialize,Deserialize)]
+    #[derive(Debug,Clone,Serialize,Deserialize)]
     pub struct Response {
         pub to: Identifier,
         pub exchange_id: ExchangeId,
         pub signal: Signal,
     }
 
-    #[derive(Clone,Serialize,Deserialize)]
+    #[derive(Debug,Clone,Serialize,Deserialize)]
     pub enum Frame {
         StartCli(CliId),
         Command(Command),
@@ -207,6 +211,7 @@ pub mod outgoing {
     }
 
     pub mod resource {
+        use serde::{Serialize,Deserialize};
         use crate::{Payload, State, Identifier, Key, Address};
         use crate::resource::Archetype;
 
@@ -262,11 +267,12 @@ pub mod outgoing {
     }
 
 pub mod http{
+        use serde::{Serialize,Deserialize};
         use std::sync::Arc;
         use std::collections::HashMap;
         use crate::Bin;
 
-        #[derive(Clone,Serialize,Deserialize)]
+        #[derive(Debug,Clone,Serialize,Deserialize)]
         pub struct HttpRequest {
             pub path: String,
             pub headers: HashMap<String,String>,
@@ -277,12 +283,13 @@ pub mod http{
 
 
 pub mod incoming {
-    use crate::{Identifier, Port, ExchangeId, Error, Signal, BinSrc, BinRaw, Payload, Entity, ExchangeKind, CliId, BinParcel};
+    use serde::{Serialize,Deserialize};
     use std::sync::Arc;
     use std::collections::HashMap;
     use crate::config::BindConfig;
+    use crate::{Identifier, Entity, ExchangeKind, ExchangeId, Signal, Port, CliId, BinParcel};
 
-    #[derive(Clone,Serialize,Deserialize)]
+    #[derive(Debug,Clone,Serialize,Deserialize)]
     pub struct Request {
         pub from: Identifier,
         pub port: Port,
@@ -290,7 +297,7 @@ pub mod incoming {
         pub kind: ExchangeKind,
     }
 
-    #[derive(Clone,Serialize,Deserialize)]
+    #[derive(Debug,Clone,Serialize,Deserialize)]
     pub struct Response {
         pub from: Identifier,
         pub exchange_id: ExchangeId,
@@ -303,7 +310,7 @@ pub mod incoming {
         pub payload: String
     }
 
-    #[derive(Clone,Serialize,Deserialize)]
+    #[derive(Debug,Clone,Serialize,Deserialize)]
     pub enum Frame {
         StartCli(CliId),
         Command(CommandOut),
