@@ -2,6 +2,11 @@
 name = "resource-mesh-portal-serde"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+homepage ="http://starlane.io/"
+readme="README.md"
+repository = "https://github.com/mechtronium/resource-mesh-portal"
+description = "The raw data types for resource-mesh-portal-api serde."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
