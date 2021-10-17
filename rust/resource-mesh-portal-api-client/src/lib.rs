@@ -71,6 +71,10 @@ impl Portal {
         self.ctrl.init( self.info.clone() ).await
     }
 
+    pub fn log( &self, log: Log ) {
+        self.inlet.send(mesh::inlet::Frame::Log(log));
+    }
+
 }
 
 impl Outlet for Portal {
@@ -78,7 +82,24 @@ impl Outlet for Portal {
         match self.status {
             Status::Ready => match frame {
                 Frame::CommandEvent(_) => {}
-                Frame::Request(_) => {}
+                Frame::Request(request) => {
+                    let (tx,rx) = oneshot::channel();
+                    let request = Request::from(request,tx,self.logger.clone());
+                    match self.ctrl.request(request).await {
+                        Ok(_) => {
+                            let inlet = self.inlet.clone();
+                            tokio::spawn( async move {
+                                let result = rx.await;
+                                if let Result::Ok(response) = result {
+                                    inlet.send( mesh::inlet::Frame(response));
+                                }
+                            });
+                        }
+                        Err(error) => {
+                            self.portal_inlet.log( Log::Error(error.message) );
+                        }
+                    }
+                }
                 Frame::Response(response) => {
                     if let Option::Some(tx) =
                         self.portal_inlet.exchanges.remove(&response.exchange_id)
@@ -116,6 +137,10 @@ impl PortalInlet {
             status: Status::Unknown,
             inlet,
         }
+    }
+
+    pub fn log( &self, log: Log ) {
+        self.inlet.send(mesh::inlet::Frame::Log(log));
     }
 
     pub fn info(&self) -> Info {
@@ -166,11 +191,23 @@ pub struct Request {
     pub port: Port,
     pub entity: Entity,
     pub kind: ExchangeKind,
-    callback: fn(response: mesh::inlet::Response),
+    tx: oneshot::Sender<mesh::inlet::Response>,
     logger: fn(message: String),
 }
 
 impl Request {
+
+    pub fn from( request: mesh::outlet::Request, tx: oneshot::Sender<mesh::inlet::Response>, logger: fn(message:String) ) -> Self {
+        Self {
+            from: request.from,
+            port: request.port,
+            entity: request.entity,
+            kind: request.kind,
+            tx,
+            logger,
+        }
+    }
+
     pub fn ok(self) {
         if self.can_reply() {
             self.respond(Signal::Ok(Entity::Empty));
@@ -205,7 +242,7 @@ impl Request {
                 exchange_id: exchange.clone(),
                 signal,
             };
-            self.callback(response);
+            self.tx.send(response);
             Ok(())
         } else {
             Err(

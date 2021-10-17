@@ -29,6 +29,7 @@ pub enum Status {
 pub enum Log{
     Warn(String),
     Info(String),
+    Error(String),
     Fatal(String)
 }
 
