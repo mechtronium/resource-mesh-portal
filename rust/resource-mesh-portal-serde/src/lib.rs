@@ -22,6 +22,14 @@ pub enum Status {
  Panic(String)
 }
 
+#[derive(Debug,Clone,Serialize,Deserialize)]
+pub enum Log{
+    Info(String),
+    Fatal(String)
+}
+
+
+
 pub mod resource {
     use serde::{Serialize,Deserialize};
     use crate::{State, Identifier, Key, Address};
@@ -102,6 +110,14 @@ pub enum ExchangeKind {
     RequestResponse(ExchangeId)
 }
 
+impl ExchangeKind {
+    pub fn is_singular_recipient(&self) -> bool {
+        match self {
+            ExchangeKind::Notification => false,
+            ExchangeKind::RequestResponse(_) => true
+        }
+    }
+}
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct BinParcel{
@@ -120,14 +136,27 @@ pub mod config {
     use serde::{Serialize,Deserialize};
     use std::collections::HashMap;
     
-    use crate::ArtifactRef;
+    use crate::{ArtifactRef, Key, Address, Identifier};
+    use crate::resource::Archetype;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Info {
+        pub key: Key,
+        pub address: Address,
+        pub parent: Identifier,
+        pub archetype: Archetype,
+        pub config: Config,
+        pub ext_config: Option<ArtifactRef>
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Config {
         pub max_bin_size: u32,
-        pub bin_parcel_size: u32
+        pub bin_parcel_size: u32,
+        pub init_timeout: u64,
+        pub frame_timeout: u64,
+        pub bind: BindConfig
     }
-
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct SchemaRef {
@@ -189,8 +218,7 @@ pub mod mesh {
     pub mod enter {
         use serde::{Serialize,Deserialize};
 
-        use crate::config::BindConfig;
-        use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel};
+        use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel, Log};
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
         pub struct Request {
@@ -208,13 +236,12 @@ pub mod mesh {
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
         pub enum Frame {
+            Log(Log),
             StartCli(CliId),
             Command(Command),
             EndCli(CliId),
-            Request(Request),
+            Request(crate::mesh::enter::Request),
             Response(Response),
-            GetBindConfig,
-            SetBindConfig(BindConfig),
             SetStatus(Status),
             BinParcel(BinParcel)
         }
@@ -281,8 +308,7 @@ pub mod mesh {
     pub mod exit {
         use serde::{Serialize,Deserialize};
 
-
-        use crate::config::BindConfig;
+        use crate::config::{BindConfig, Config, Info};
         use crate::{Identifier, Entity, ExchangeKind, ExchangeId, Signal, Port, CliId, BinParcel};
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -308,13 +334,15 @@ pub mod mesh {
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
         pub enum Frame {
+            Init(Info),
             StartCli(CliId),
             Command(CommandOut),
             EndCli(CliId),
             Request(Request),
             Response(Response),
             BindConfig(BindConfig),
-            BinParcel(BinParcel)
+            BinParcel(BinParcel),
+            Shutdown
         }
 
         pub mod resource {

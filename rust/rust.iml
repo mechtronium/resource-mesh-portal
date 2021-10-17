@@ -6,6 +6,8 @@
       <sourceFolder url="file://$MODULE_DIR$/resource-mesh-portal-serde/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/resource-mesh-portal-api-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/resource-mesh-portal-api-server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/resource-mesh-portal-api-test/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
