@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate strum_macros;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use serde::{Serialize,Deserialize};
@@ -14,7 +17,7 @@ pub type ArtifactRef=String;
 pub type Artifact=Arc<Vec<u8>>;
 pub type Port=String;
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug,Clone,Serialize,Deserialize,strum_macros::Display)]
 pub enum Status {
  Unknown,
  Initializing,
@@ -24,6 +27,7 @@ pub enum Status {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Log{
+    Warn(String),
     Info(String),
     Fatal(String)
 }
@@ -62,7 +66,7 @@ pub mod resource {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Operation {
-    Resource(mesh::enter::Operation),
+    Resource(mesh::inlet::Operation),
     Ext(ExtOperation)
 }
 
@@ -106,6 +110,7 @@ pub enum Signal {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum ExchangeKind {
+    None,
     Notification,
     RequestResponse(ExchangeId)
 }
@@ -113,6 +118,7 @@ pub enum ExchangeKind {
 impl ExchangeKind {
     pub fn is_singular_recipient(&self) -> bool {
         match self {
+            ExchangeKind::None => false,
             ExchangeKind::Notification => false,
             ExchangeKind::RequestResponse(_) => true
         }
@@ -155,6 +161,7 @@ pub mod config {
         pub bin_parcel_size: u32,
         pub init_timeout: u64,
         pub frame_timeout: u64,
+        pub response_timeout: u64,
         pub bind: BindConfig
     }
 
@@ -215,7 +222,7 @@ pub mod http{
 }
 
 pub mod mesh {
-    pub mod enter {
+    pub mod inlet {
         use serde::{Serialize,Deserialize};
 
         use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel, Log};
@@ -227,6 +234,16 @@ pub mod mesh {
             pub kind: ExchangeKind,
         }
 
+        impl Request {
+            pub fn new(operation: Operation) -> Self {
+                Self{
+                    to: vec![],
+                    operation,
+                    kind: ExchangeKind::None
+                }
+            }
+        }
+
         #[derive(Debug,Clone,Serialize,Deserialize)]
         pub struct Response {
             pub to: Identifier,
@@ -234,15 +251,13 @@ pub mod mesh {
             pub signal: Signal,
         }
 
-        #[derive(Debug,Clone,Serialize,Deserialize)]
+        #[derive(Debug,Clone,Serialize,Deserialize,strum_macros::Display)]
         pub enum Frame {
             Log(Log),
-            StartCli(CliId),
             Command(Command),
-            EndCli(CliId),
-            Request(crate::mesh::enter::Request),
+            Request(Request),
             Response(Response),
-            SetStatus(Status),
+            Status(Status),
             BinParcel(BinParcel)
         }
 
@@ -305,7 +320,7 @@ pub mod mesh {
 
     }
 
-    pub mod exit {
+    pub mod outlet {
         use serde::{Serialize,Deserialize};
 
         use crate::config::{BindConfig, Config, Info};
@@ -327,20 +342,24 @@ pub mod mesh {
         }
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
-        pub struct CommandOut{
+        pub struct CommandEvent{
             pub cli: CliId,
-            pub payload: String
+            pub line: Option<String>,
+            pub status: CommandStatus
         }
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
+        pub enum CommandStatus{
+            Running,
+            Exit(i32)
+        }
+
+        #[derive(Debug,Clone,Serialize,Deserialize,strum_macros::Display)]
         pub enum Frame {
             Init(Info),
-            StartCli(CliId),
-            Command(CommandOut),
-            EndCli(CliId),
+            CommandEvent(CommandEvent),
             Request(Request),
             Response(Response),
-            BindConfig(BindConfig),
             BinParcel(BinParcel),
             Shutdown
         }

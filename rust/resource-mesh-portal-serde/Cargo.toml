@@ -12,3 +12,5 @@ description = "The raw data types for resource-mesh-portal-api serde."
 
 [dependencies]
 serde = { version="1.0.69", features=['derive','rc'] }
+strum = "0.21.0"
+strum_macros = "0.21.1"

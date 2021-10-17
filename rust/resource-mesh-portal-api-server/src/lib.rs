@@ -38,11 +38,11 @@ pub enum PortalKind {
 
 pub struct Exchange {
     pub id: ExchangeId,
-    pub tx: tokio::sync::oneshot::Sender<mesh::enter::Response>,
+    pub tx: tokio::sync::oneshot::Sender<mesh::inlet::Response>,
 }
 
 enum PortalCall {
-    Frame(mesh::enter::Frame),
+    Frame(mesh::inlet::Frame),
     Exchange(Exchange)
 }
 
@@ -63,7 +63,7 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn from( request: mesh::enter::Request, from: Identifier, to: Identifier ) -> Self {
+    pub fn from(request: mesh::inlet::Request, from: Identifier, to: Identifier ) -> Self {
         Self{
             to,
             from,
@@ -82,7 +82,7 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn from( response: mesh::exit::Response, from: Identifier, to: Identifier ) -> Self {
+    pub fn from(response: mesh::outlet::Response, from: Identifier, to: Identifier ) -> Self {
         Self{
             to,
             from,
@@ -99,7 +99,7 @@ pub struct Portal {
     pub address: Address,
     pub info: Info,
     pub kind: PortalKind,
-    exit_tx: mpsc::Sender<mesh::exit::Frame>,
+    outlet_tx: mpsc::Sender<mesh::outlet::Frame>,
     mux_tx: mpsc::Sender<MuxCall>,
     pub log: fn(log:Log),
     status_tx: tokio::sync::broadcast::Sender<Status>,
@@ -114,15 +114,15 @@ impl Portal {
         self.status.clone()
     }
 
-    pub fn new(key: Key, address: Address, kind: PortalKind, info: Info, exit_tx: mpsc::Sender<mesh::exit::Frame>, enter_rx: mpsc::Receiver<mesh::enter::Frame>, logger: fn(log:Log) ) -> Self {
+    pub fn new(key: Key, address: Address, kind: PortalKind, info: Info, outlet_tx: mpsc::Sender<mesh::outlet::Frame>, inlet_rx: mpsc::Receiver<mesh::inlet::Frame>, logger: fn(log:Log) ) -> Self {
         let (mux_tx,mux_rx) = tokio::sync::mpsc::channel(128);
         let (status_tx,status_rx) = tokio::sync::broadcast::channel(1);
         let (call_tx,mut call_rx) = tokio::sync::mpsc::channel(128);
         {
             let command_tx = call_tx.clone();
-            let mut enter_rx = enter_rx;
+            let mut inlet_rx = inlet_rx;
             tokio::spawn(async move {
-                while let Option::Some(frame) = enter_rx.recv().await {
+                while let Option::Some(frame) = inlet_rx.recv().await {
                     command_tx.send(PortalCall::Frame(frame)).await.unwrap_or_else(
                         || {
                             logger(Log::Fatal("FATAL: could not send PortalCommand through command_tx channel".to_string()));
@@ -135,20 +135,20 @@ impl Portal {
         {
             let mut exchanges =  HashMap::new();
             let mux_tx= mux_tx.clone();
-            let exit_tx = exit_tx.clone();
+            let outlet_tx = outlet_tx.clone();
             let info = info.clone();
             tokio::spawn(async move {
                 while let Option::Some(command) = call_rx.recv().await {
                     match command {
                         PortalCall::Frame(frame) => {
                             match frame {
-                                mesh::enter::Frame::Log(log) => {
+                                mesh::inlet::Frame::Log(log) => {
                                     log
                                 }
-                                mesh::enter::Frame::StartCli(_) => {}
-                                mesh::enter::Frame::Command(_) => {}
-                                mesh::enter::Frame::EndCli(_) => {}
-                                mesh::enter::Frame::Request(request) => {
+                                mesh::inlet::Frame::StartCli(_) => {}
+                                mesh::inlet::Frame::Command(_) => {}
+                                mesh::inlet::Frame::EndCli(_) => {}
+                                mesh::inlet::Frame::Request(request) => {
                                     match &request.kind {
                                         ExchangeKind::Notification => {
                                             for to in &request.to {
@@ -161,12 +161,12 @@ impl Portal {
                                         }
                                         ExchangeKind::RequestResponse(exchange_id) => {
                                             if request.to.len() != 1 {
-                                                let response = mesh::exit::Response{
+                                                let response = mesh::outlet::Response{
                                                     from: info.key.clone(),
                                                     exchange_id: exchange_id.clone(),
                                                     signal: Signal::Error("a RequestResponse message must have one and only one to recipient.".to_string())
                                                 };
-                                                let result = exit_tx.send_timeout(mesh::exit::Frame::Response(response), Duration::from_secs(info.config.frame_timeout.clone()) ).await;
+                                                let result = outlet_tx.send_timeout(mesh::outlet::Frame::Response(response), Duration::from_secs(info.config.frame_timeout.clone()) ).await;
                                                 if let Result::Err(err) = result {
                                                     logger(Log::Fatal("FATAL: frame timeout error exit_tx".to_string()));
                                                 }
@@ -182,7 +182,7 @@ impl Portal {
                                     }
 
                                 }
-                                mesh::enter::Frame::Response(response) => {
+                                mesh::inlet::Frame::Response(response) => {
                                     match exchanges.remove( &response.exchange_id ) {
                                         None => {
                                             logger(Log::Fatal(format!("FATAL: missing request/response exchange id '{}'", response.exchange_id)));
@@ -192,8 +192,8 @@ impl Portal {
                                         }
                                     }
                                 }
-                                mesh::enter::Frame::BinParcel(_) => {}
-                                mesh::enter::Frame::SetStatus(status) => {
+                                mesh::inlet::Frame::BinParcel(_) => {}
+                                mesh::inlet::Frame::Status(status) => {
                                     status_tx.send(status).unwrap_or_default();
                                 }
                             }
@@ -213,7 +213,7 @@ impl Portal {
             kind,
             info,
             call_tx,
-            exit_tx,
+            outlet_tx,
             status_tx,
             status_rx,
             status: PortalStatus::None,
@@ -223,12 +223,12 @@ impl Portal {
         }
     }
 
-    pub async fn send(&self, frame: mesh::exit::Frame ) -> Result<(),Error> {
-        self.exit_tx.send_timeout(frame, self.info.config.frame_timeout.clone() ).await?;
+    pub async fn send(&self, frame: mesh::outlet::Frame ) -> Result<(),Error> {
+        self.outlet_tx.send_timeout(frame, self.info.config.frame_timeout.clone() ).await?;
         Ok(())
     }
 
-    pub async fn exchange(&self, request: mesh::exit::Request ) -> Result<mesh::enter::Response,Error> {
+    pub async fn exchange(&self, request: mesh::outlet::Request ) -> Result<mesh::inlet::Response,Error> {
         let mut request = request;
         let exchangeId: ExchangeId = Uuid::new_v4().to_string();
         request.kind = ExchangeKind::RequestResponse(exchangeId.clone());
@@ -244,7 +244,7 @@ impl Portal {
 
 
     pub fn shutdown(&mut self) {
-        self.exit_tx.try_send(mesh::exit::Frame::Shutdown).unwrap_or(());
+        self.outlet_tx.try_send(mesh::outlet::Frame::Shutdown).unwrap_or(());
     }
 
     pub async fn init(&mut self) -> Result<(),Error> {
@@ -254,7 +254,7 @@ impl Portal {
 
         self.status = PortalStatus::Initializing;
 
-        self.exit_tx.try_send(mesh::exit::Frame::Init(self.info.clone()) )?;
+        self.outlet_tx.try_send(mesh::outlet::Frame::Init(self.info.clone()) )?;
         let mut status_rx = self.status_tx.subscribe();
         let (tx,rx) = tokio::sync::oneshot::channel();
         let config = self.info.config.clone();
@@ -372,22 +372,20 @@ impl PortalMuxer {
 
             let (call, future_index, _) = select_all(futures).await;
 
-            while let Option::Some(command) = portal_rx.recv().await {
-                match command {
-                    MuxCall::Add(portal) => {
-                        muxer.portals.insert(portal.info.key.clone(), portal );
+            match call {
+                MuxCall::Add(portal) => {
+                    muxer.portals.insert(portal.info.key.clone(), portal );
+                }
+                MuxCall::Remove(key) => {
+                    if let Option::Some(mut portal) = muxer.portals.remove(&key) {
+                        portal.shutdown();
                     }
-                    MuxCall::Remove(key) => {
-                        if let Option::Some(mut portal) = muxer.portals.remove(&key) {
-                            portal.shutdown();
-                        }
-                    }
-                    MuxCall::Request(request) => {
-                        muxer.router(Message::Request(request));
-                    }
-                    MuxCall::Response(response) => {
-                        muxer.router(Message::Response(response));
-                    }
+                }
+                MuxCall::Request(request) => {
+                    muxer.router(Message::Request(request));
+                }
+                MuxCall::Response(response) => {
+                    muxer.router(Message::Response(response));
                 }
             }
         } );
