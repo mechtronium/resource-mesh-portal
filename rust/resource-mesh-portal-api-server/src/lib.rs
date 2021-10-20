@@ -402,7 +402,9 @@ impl PortalMuxer {
                         return;
                     } else {
                         let key = keys.get(future_index).expect("expected key");
-                        muxer.portals.remove(key );
+                        if let Option::Some(mut portal) = muxer.portals.remove(key) {
+                            portal.shutdown();
+                        }
                     }
                 }
                 Some(call) => {

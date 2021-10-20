@@ -1,5 +1,3 @@
-#[macro_use]
-extern crate strum_macros;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -226,7 +224,7 @@ pub mod mesh {
     pub mod inlet {
         use serde::{Serialize,Deserialize};
 
-        use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, CliId, Command, Status, BinParcel, Log};
+        use crate::{Identifier, Operation, ExchangeKind, ExchangeId, Signal, Command, Status, BinParcel, Log};
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
         pub struct Request {

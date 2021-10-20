@@ -9,3 +9,5 @@ edition = "2021"
 resource-mesh-portal-serde = { path = "../resource-mesh-portal-serde", version= "0.0.1"}
 resource-mesh-portal-api-client = { path = "../resource-mesh-portal-api-client", version= "0.0.1"}
 resource-mesh-portal-api-server = { path = "../resource-mesh-portal-api-server", version= "0.0.1"}
+tokio = { version = "1.4.0", features = ["full"] }
+
