@@ -1,8 +1,10 @@
-pub mod error;
+
+#[macro_use]
+extern crate anyhow;
 
 use resource_mesh_portal_serde::{mesh, Address, Key, Status, ExchangeId, ExchangeKind, Identifier, Operation, Log, Signal};
 use resource_mesh_portal_serde::config::{Config, BindConfig, Info};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -10,7 +12,9 @@ use std::convert::TryFrom;
 use futures::future::select_all;
 use futures::{FutureExt, SinkExt};
 use anyhow::Error;
+use tokio::sync::broadcast::error::RecvError;
 
+#[derive(Clone,Eq,PartialEq,Hash)]
 pub enum PortalStatus{
     None,
     Initializing,
@@ -22,9 +26,14 @@ pub fn log( log: Log) {
     match log {
         Log::Info(message) => {
             println!("{}",message);
-
         }
         Log::Fatal(message) => {
+            eprintln!("{}",message);
+        }
+        Log::Warn(message) => {
+            println!("{}",message);
+        }
+        Log::Error(message) => {
             eprintln!("{}",message);
         }
     }
@@ -37,11 +46,13 @@ pub enum PortalKind {
     Portal
 }
 
+#[derive(Debug)]
 pub struct Exchange {
     pub id: ExchangeId,
     pub tx: tokio::sync::oneshot::Sender<mesh::inlet::Response>,
 }
 
+#[derive(Debug)]
 enum PortalCall {
     Frame(mesh::inlet::Frame),
     Exchange(Exchange)
@@ -111,7 +122,7 @@ pub struct Portal {
 }
 
 impl Portal {
-    pub fn status(&self) -> Status {
+    pub fn status(&self) -> PortalStatus {
         self.status.clone()
     }
 
@@ -125,7 +136,7 @@ impl Portal {
             tokio::spawn(async move {
                 while let Option::Some(frame) = inlet_rx.recv().await {
                     command_tx.send(PortalCall::Frame(frame)).await.unwrap_or_else(
-                        || {
+                        |err| {
                             logger(Log::Fatal("FATAL: could not send PortalCommand through command_tx channel".to_string()));
                         }
                     );
@@ -134,21 +145,20 @@ impl Portal {
         }
 
         {
-            let mut exchanges =  HashMap::new();
+            let mut exchanges:HashMap<ExchangeId,oneshot::Sender<mesh::inlet::Response>> =  HashMap::new();
             let mux_tx= mux_tx.clone();
             let outlet_tx = outlet_tx.clone();
             let info = info.clone();
+            let status_tx = status_tx.clone();
             tokio::spawn(async move {
                 while let Option::Some(command) = call_rx.recv().await {
                     match command {
                         PortalCall::Frame(frame) => {
                             match frame {
                                 mesh::inlet::Frame::Log(log) => {
-                                    log
+                                    (logger)(log);
                                 }
-                                mesh::inlet::Frame::StartCli(_) => {}
                                 mesh::inlet::Frame::Command(_) => {}
-                                mesh::inlet::Frame::EndCli(_) => {}
                                 mesh::inlet::Frame::Request(request) => {
                                     match &request.kind {
                                         ExchangeKind::None=> {
@@ -193,7 +203,7 @@ impl Portal {
                                         }
                                         Some(tx) => {
                                             let mut tx = tx;
-                                            tx.send(response)
+                                            tx.send(response);
                                         }
                                     }
                                 }
@@ -242,7 +252,7 @@ impl Portal {
             id: exchangeId,
             tx
         };
-        self.call_tx.send_timeout(PortalCall::Exchange(exchange), self.info.config.frame_timeout.clone() ).await?;
+        self.call_tx.send_timeout(PortalCall::Exchange(exchange), Duration::from_secs(self.info.config.frame_timeout.clone()) ).await?;
 
         Ok(rx.await?)
     }
@@ -253,8 +263,9 @@ impl Portal {
     }
 
     pub async fn init(&mut self) -> Result<(), Error> {
-        if self.status != Status::Unknown {
-            return Err(format!("{} has already received the init signal.",self.kind.to_string()).into());
+        if self.status != PortalStatus::None {
+            let message = format!("{} has already received the init signal.",self.kind.to_string());
+            return Err(anyhow!(message));
         }
 
         self.status = PortalStatus::Initializing;
@@ -273,15 +284,21 @@ impl Portal {
                         }
                         Ok(Result::Err(err)) => {
                             tx.send(Result::Err(format!("ERROR: when waiting for {} status: 'Ready' message: '{}'",kind.to_string(),err.to_string())) );
-                            return;
+                            break;
                         }
                         Err(err) => {
                             tx.send(Result::Err(format!("PANIC: {} init timeout after '{}' seconds", kind.to_string(), config.init_timeout.clone() ).into()) );
-                            return;
+                            break;
                         }
                     }
                 } else {
-                    status_rx.recv().await
+                    match status_rx.recv().await {
+                        Ok(status) => status,
+                        Err(err) => {
+                            tx.send(Result::Err(format!("ERROR: when waiting for {} status: 'Ready' message: '{}'",kind.to_string(),err.to_string())) );
+                            break;
+                        }
+                    }
                 };
 
                 match status_rx.recv().await {
@@ -289,9 +306,11 @@ impl Portal {
                         match status {
                             Status::Ready => {
                                 tx.send(Result::Ok(()) );
+                                break;
                             }
                             Status::Panic(message) => {
                                 tx.send(Result::Err(format!("PANIC: {} panic on init message: '{}'", kind.to_string(), message).into()) );
+                                break;
                             }
                             _ => {
                                 // ignore this status
@@ -300,6 +319,7 @@ impl Portal {
                     }
                     Err(err) => {
                         tx.send(Result::Err(format!("ERROR: when waiting for {} status: 'Ready' message: '{}'", kind.to_string(), err.to_string()).into()));
+                        break;
                     }
                 }
             }
@@ -310,14 +330,14 @@ impl Portal {
                 Ok(())
             }
             Ok(Err(err)) => {
-                self.status = PortalStatus::Panic(err);
+                self.status = PortalStatus::Panic(err.clone());
                 self.shutdown();
-                Err(err.into())
+                Err(anyhow!(err))
             }
             Err(err) => {
                 self.status = PortalStatus::Panic(err.to_string());
                 self.shutdown();
-                Err(err.to_string().into())
+                Err(anyhow!(err))
             }
         }
     }
@@ -365,34 +385,46 @@ impl PortalMuxer {
 
         tokio::spawn( async move {
 
-            let mut futures = vec![];
             let mut keys = vec![];
+            let mut futures = vec![];
 
             for (key,portal) in &mut muxer.portals {
+                futures.push( portal.mux_rx.recv().boxed() );
                 keys.push(key.clone());
-                futures.push(portal.mux_rx.recv().boxed() );
             }
-
-            futures.push( portal_rx.recv().boxed() );
 
             let (call, future_index, _) = select_all(futures).await;
 
             match call {
-                MuxCall::Add(portal) => {
-                    muxer.portals.insert(portal.info.key.clone(), portal );
-                }
-                MuxCall::Remove(key) => {
-                    if let Option::Some(mut portal) = muxer.portals.remove(&key) {
-                        portal.shutdown();
+                None => {
+                    if future_index > keys.len() {
+                        // shutdown
+                        return;
+                    } else {
+                        let key = keys.get(future_index).expect("expected key");
+                        muxer.portals.remove(key );
                     }
                 }
-                MuxCall::Request(request) => {
-                    muxer.router(Message::Request(request));
-                }
-                MuxCall::Response(response) => {
-                    muxer.router(Message::Response(response));
+                Some(call) => {
+                    match call {
+                        MuxCall::Add(portal) => {
+                            muxer.portals.insert(portal.info.key.clone(), portal );
+                        }
+                        MuxCall::Remove(key) => {
+                            if let Option::Some(mut portal) = muxer.portals.remove(&key) {
+                                portal.shutdown();
+                            }
+                        }
+                        MuxCall::Request(request) => {
+                            (muxer.router)(Message::Request(request));
+                        }
+                        MuxCall::Response(response) => {
+                            (muxer.router)(Message::Response(response));
+                        }
+                    }
                 }
             }
+
         } );
 
         portal_tx

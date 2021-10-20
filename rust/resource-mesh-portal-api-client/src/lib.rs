@@ -4,8 +4,6 @@ extern crate async_trait;
 #[macro_use]
 extern crate anyhow;
 
-pub mod error;
-
 use resource_mesh_portal_serde::config::{Config, Info};
 use resource_mesh_portal_serde::mesh::outlet::Frame;
 use resource_mesh_portal_serde::{
