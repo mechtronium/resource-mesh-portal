@@ -322,7 +322,7 @@ pub mod mesh {
     pub mod outlet {
         use serde::{Serialize,Deserialize};
 
-        use crate::config::{BindConfig, Config, Info};
+        use crate::config::{Info};
         use crate::{Identifier, Entity, ExchangeKind, ExchangeId, Signal, Port, CliId, BinParcel};
 
         #[derive(Debug,Clone,Serialize,Deserialize)]

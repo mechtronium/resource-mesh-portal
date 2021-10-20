@@ -3,16 +3,16 @@
 extern crate anyhow;
 
 use resource_mesh_portal_serde::{mesh, Address, Key, Status, ExchangeId, ExchangeKind, Identifier, Operation, Log, Signal};
-use resource_mesh_portal_serde::config::{Config, BindConfig, Info};
+use resource_mesh_portal_serde::config::{Info};
 use tokio::sync::{mpsc, oneshot};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 use uuid::Uuid;
 use std::collections::HashMap;
-use std::convert::TryFrom;
+
 use futures::future::select_all;
 use futures::{FutureExt, SinkExt};
 use anyhow::Error;
-use tokio::sync::broadcast::error::RecvError;
+
 
 #[derive(Clone,Eq,PartialEq,Hash)]
 pub enum PortalStatus{
@@ -136,7 +136,7 @@ impl Portal {
             tokio::spawn(async move {
                 while let Option::Some(frame) = inlet_rx.recv().await {
                     command_tx.send(PortalCall::Frame(frame)).await.unwrap_or_else(
-                        |err| {
+                        |_err| {
                             logger(Log::Fatal("FATAL: could not send PortalCommand through command_tx channel".to_string()));
                         }
                     );
@@ -168,7 +168,7 @@ impl Portal {
                                             for to in &request.to {
                                                 let request = Request::from( request.clone(), info.key.clone(), to.clone() );
                                                 let result = mux_tx.send_timeout(MuxCall::Request(request), Duration::from_secs(info.config.frame_timeout.clone())).await;
-                                                if let Result::Err(err) = result {
+                                                if let Result::Err(_err) = result {
                                                     logger(Log::Fatal("FATAL: send timeout error request_tx".to_string()))
                                                 }
                                             }
@@ -181,14 +181,14 @@ impl Portal {
                                                     signal: Signal::Error("a RequestResponse message must have one and only one to recipient.".to_string())
                                                 };
                                                 let result = outlet_tx.send_timeout(mesh::outlet::Frame::Response(response), Duration::from_secs(info.config.frame_timeout.clone()) ).await;
-                                                if let Result::Err(err) = result {
+                                                if let Result::Err(_err) = result {
                                                     logger(Log::Fatal("FATAL: frame timeout error exit_tx".to_string()));
                                                 }
                                             } else {
                                                 let to = request.to.first().expect("expected to identifier").clone();
                                                 let request = Request::from( request.clone(), info.key.clone(), to );
                                                 let result = mux_tx.send_timeout(MuxCall::Request(request), Duration::from_secs(info.config.frame_timeout.clone())).await;
-                                                if let Result::Err(err) = result {
+                                                if let Result::Err(_err) = result {
                                                     logger(Log::Fatal("FATAL: frame timeout error request_tx".to_string()));
                                                 }
                                             }
@@ -202,7 +202,7 @@ impl Portal {
                                             logger(Log::Fatal(format!("FATAL: missing request/response exchange id '{}'", response.exchange_id)));
                                         }
                                         Some(tx) => {
-                                            let mut tx = tx;
+                                            let tx = tx;
                                             tx.send(response);
                                         }
                                     }
@@ -277,7 +277,7 @@ impl Portal {
         let kind = self.kind.clone();
         tokio::spawn( async move {
             loop {
-                let status = if config.init_timeout > 0 {
+                let _status = if config.init_timeout > 0 {
                     match tokio::time::timeout( Duration::from_secs(config.init_timeout.clone() ), status_rx.recv() ).await {
                         Ok(Ok(status)) => {
                             status
@@ -286,7 +286,7 @@ impl Portal {
                             tx.send(Result::Err(format!("ERROR: when waiting for {} status: 'Ready' message: '{}'",kind.to_string(),err.to_string())) );
                             break;
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             tx.send(Result::Err(format!("PANIC: {} init timeout after '{}' seconds", kind.to_string(), config.init_timeout.clone() ).into()) );
                             break;
                         }
@@ -376,7 +376,7 @@ pub struct PortalMuxer {
 
 impl PortalMuxer {
     pub fn new(router: fn(message:Message)) -> mpsc::Sender<MuxCall> {
-        let (portal_tx, mut portal_rx) = tokio::sync::mpsc::channel(128);
+        let (portal_tx, _portal_rx) = tokio::sync::mpsc::channel(128);
 
         let mut muxer = Self {
             portals: HashMap::new(),

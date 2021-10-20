@@ -4,20 +4,20 @@ extern crate async_trait;
 #[macro_use]
 extern crate anyhow;
 
-use resource_mesh_portal_serde::config::{Config, Info};
+use resource_mesh_portal_serde::config::{Info};
 use resource_mesh_portal_serde::mesh::outlet::Frame;
 use resource_mesh_portal_serde::{
     mesh, Entity, ExchangeId, ExchangeKind, Identifier, Log, Port, Signal, Status,
 };
-use std::collections::HashMap;
+
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::mpsc;
+
 use tokio::sync::oneshot;
 use uuid::Uuid;
 use dashmap::DashMap;
 use anyhow::Error;
-use std::cell::Cell;
+
 
 #[async_trait]
 pub trait PortalCtrl : Sync+Send {
@@ -102,7 +102,7 @@ impl Portal {
         ctrl.init();
         let ctrl = ctrl.into();
         let inlet_api = Arc::new(InletApi::new(skel.clone() ));
-        let mut portal = Self {
+        let portal = Self {
             skel: skel.clone(),
             ctrl,
             inlet_api
@@ -289,7 +289,7 @@ impl Request {
 
 pub mod example {
     use crate::{PortalCtrl, InletApi, Request, PortalSkel};
-    use resource_mesh_portal_serde::config::Info;
+    
     use resource_mesh_portal_serde::{mesh, Entity, ExtOperation, Operation, PortRequest, Signal, Payload};
     use std::sync::Arc;
     use anyhow::Error;
