@@ -1,188 +1,226 @@
 #[macro_use]
 extern crate async_trait;
 
+#[macro_use]
+extern crate anyhow;
+
 pub mod error;
 
-use crate::error::Error;
 use resource_mesh_portal_serde::config::{Config, Info};
 use resource_mesh_portal_serde::mesh::outlet::Frame;
 use resource_mesh_portal_serde::{
     mesh, Entity, ExchangeId, ExchangeKind, Identifier, Log, Port, Signal, Status,
 };
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
+use dashmap::DashMap;
+use anyhow::Error;
+use std::cell::Cell;
 
 #[async_trait]
-pub trait PortalCtrl {
-    async fn init(&mut self, info: Info ) -> Result<(),Error>;
-    async fn request(&self, request: Request ) -> Result<(),Error>;
+pub trait PortalCtrl : Sync+Send {
+    async fn init(&mut self) -> Result<(), Error>;
+    async fn request(&self, request: Request ) -> Result<(), Error>;
 }
 
 pub fn log(message: &str) {
-    println!(message);
+    println!("{}",message);
 }
 
-pub trait Inlet {
+pub trait Inlet: Sync+Send {
     fn send(&self, frame: mesh::inlet::Frame);
 }
 
-pub trait Outlet {
+pub trait Outlet: Sync+Send {
     fn receive(&mut self, frame: mesh::outlet::Frame);
 }
 
-pub struct Portal {
+pub struct StatusChamber {
+    pub status: Status
+}
+
+impl StatusChamber{
+    pub fn new( status: Status ) -> Self {
+        Self {
+            status
+        }
+    }
+}
+
+pub struct PortalSkel {
     pub info: Info,
-    pub status: Status,
-    inlet: Arc<dyn Inlet>,
-    portal_inlet: Arc<PortalInlet>,
-    logger: fn(message: &str),
-    ctrl: Box<dyn PortalCtrl>,
+    pub inlet: Box<dyn Inlet>,
+    pub logger: fn(message: &str),
+    pub exchanges: DashMap<ExchangeId, oneshot::Sender<mesh::outlet::Response>>,
+    pub status: RwLock<StatusChamber>,
+}
+
+impl PortalSkel {
+    pub fn status(&self) -> Status {
+        (*self.status.read().expect("expected status read lock")).status.clone()
+    }
+
+    pub fn set_status(&mut self, status: Status) {
+        {
+            self.status.write().expect("expected to get status write lock").status = status.clone();
+        }
+        self.inlet.send(mesh::inlet::Frame::Status(status));
+    }
+
+}
+
+
+pub struct Portal {
+    pub skel: Arc<PortalSkel>,
+    pub ctrl: Arc<dyn PortalCtrl>,
+    pub inlet_api: Arc<InletApi>
 }
 
 impl Portal {
     pub async fn new(
         info: Info,
-        inlet: Arc<dyn Inlet>,
-        ctrl_factory: fn(portal: Arc<PortalInlet>) -> Box<dyn PortalCtrl>,
+        inlet: Box<dyn Inlet>,
+        ctrl_factory: fn(skel: Arc<PortalSkel>, portal: InletApi) -> Box<dyn PortalCtrl>,
         logger: fn(message: &str),
     ) -> Result<Arc<Portal>, Error> {
-        let portal_inlet = Arc::new(PortalInlet::new(info.clone(), inlet.clone()));
+
+        let status = RwLock::new(StatusChamber::new( Status::Initializing ));
         inlet.send(mesh::inlet::Frame::Status(Status::Initializing));
-        let ctrl = ctrl_factory(portal_inlet.clone());
-        let mut portal = Arc::new(Self {
+        let exchanges = DashMap::new();
+        let skel = Arc::new( PortalSkel {
             info: info.clone(),
-            status: Status::Initializing,
             inlet,
-            portal_inlet,
             logger,
-            ctrl,
+            exchanges,
+            status
         });
 
-        portal.init().await?;
+        let inlet_api = InletApi::new(skel.clone() );
+        let mut ctrl = ctrl_factory(skel.clone(), inlet_api);
+        ctrl.init();
+        let ctrl = ctrl.into();
+        let inlet_api = Arc::new(InletApi::new(skel.clone() ));
+        let mut portal = Self {
+            skel: skel.clone(),
+            ctrl,
+            inlet_api
+        };
 
-        Ok(portal)
-    }
-
-    pub async fn init(&mut self) -> Result<(),Error> {
-        self.ctrl.init( self.info.clone() ).await
+        Ok(Arc::new(portal))
     }
 
     pub fn log( &self, log: Log ) {
-        self.inlet.send(mesh::inlet::Frame::Log(log));
+        self.skel.inlet.send(mesh::inlet::Frame::Log(log));
     }
 
 }
 
+#[async_trait]
 impl Outlet for Portal {
     fn receive(&mut self, frame: Frame) {
-        match self.status {
+        match self.skel.status() {
             Status::Ready => match frame {
                 Frame::CommandEvent(_) => {}
                 Frame::Request(request) => {
-                    let (tx,rx) = oneshot::channel();
-                    let request = Request::from(request,tx,self.logger.clone());
-                    match self.ctrl.request(request).await {
-                        Ok(_) => {
-                            let inlet = self.inlet.clone();
-                            tokio::spawn( async move {
-                                let result = rx.await;
-                                if let Result::Ok(response) = result {
-                                    inlet.send( mesh::inlet::Frame(response));
-                                }
-                            });
+                    let ctrl = self.ctrl.clone();
+                    let inlet_api = self.inlet_api.clone();
+                    let skel = self.skel.clone();
+                    tokio::spawn( async move {
+                        let (tx, rx) = oneshot::channel();
+                        let request = Request::from(request, tx, skel.logger );
+                        match ctrl.request(request).await {
+                            Ok(_) => {
+                                tokio::spawn(async move {
+                                    let result = rx.await;
+                                    if let Result::Ok(response) = result {
+                                        inlet_api.respond( response );
+                                    }
+                                });
+                            }
+                            Err(error) => {
+                                inlet_api.log(Log::Error(error.to_string()));
+                            }
                         }
-                        Err(error) => {
-                            self.portal_inlet.log( Log::Error(error.message) );
-                        }
-                    }
+                    });
                 }
                 Frame::Response(response) => {
-                    if let Option::Some(tx) =
-                        self.portal_inlet.exchanges.remove(&response.exchange_id)
+                    if let Option::Some((_,tx)) =
+                        self.skel.exchanges.remove(&response.exchange_id)
                     {
                         tx.send(response);
                     } else {
-                        self.logger("SEVERE: do not have a matching exchange_id for response");
+                        (self.skel.logger)("SEVERE: do not have a matching exchange_id for response");
                     }
                 }
                 Frame::BinParcel(_) => {}
                 Frame::Shutdown => {}
                 _ => {
-                    self.logger(format!("SEVERE: frame ignored because status: '{}' does not allow handling of frame '{}'",self.status.to_string(),frame.to_string()).as_str());
+                    (self.skel.logger)(format!("SEVERE: frame ignored because status: '{}' does not allow handling of frame '{}'",self.skel.status().to_string(),frame.to_string()).as_str());
                 }
             },
             _ => {
-                self.logger(format!("SEVERE: frame ignored because status: '{}' does not allow handling of frame '{}'",self.status.to_string(),frame.to_string()).as_str());
+                (self.skel.logger)(format!("SEVERE: frame ignored because status: '{}' does not allow handling of frame '{}'",self.skel.status().to_string(),frame.to_string()).as_str());
             }
         }
     }
 }
 
-pub struct PortalInlet {
-    info: Info,
-    status: Status,
-    inlet: Arc<dyn Inlet>,
-    exchanges: HashMap<ExchcangeId, oneshot::Sender<mesh::outlet::Response>>,
+pub struct InletApi {
+    skel: Arc<PortalSkel>,
 }
 
-impl PortalInlet {
-    pub fn new(info: Info, inlet: Arc<dyn Inlet>) -> Self {
+impl InletApi {
+    pub fn new(skel: Arc<PortalSkel> ) -> Self {
         Self {
-            info,
-            exchanges: HashMap::new(),
-            status: Status::Unknown,
-            inlet,
+            skel
         }
     }
 
     pub fn log( &self, log: Log ) {
-        self.inlet.send(mesh::inlet::Frame::Log(log));
+        self.skel.inlet.send(mesh::inlet::Frame::Log(log));
     }
 
     pub fn info(&self) -> Info {
-        self.info.clone()
+        self.skel.info.clone()
     }
 
-    pub fn status(&self) -> Status {
-        self.status.clone()
-    }
 
-    pub fn set_status(&mut self, status: Status) {
-        self.status = status.clone();
-        self.inlet.send(mesh::inlet::Frame::Status(status));
-    }
 
     pub fn notify(&self, request: mesh::inlet::Request) {
         let mut request = request;
         if let ExchangeKind::None = request.kind {
         } else {
-            self.inlet.send(mesh::inlet::Frame(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
+            self.log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string()));
         }
         request.kind = ExchangeKind::Notification;
-        self.inlet.send(mesh::inlet::Frame::Request(request));
+        self.skel.inlet.send(mesh::inlet::Frame::Request(request));
     }
 
     pub async fn exchange(
         &mut self,
         request: mesh::inlet::Request
-    ) -> Result<mesh::outlet::Response,Error> {
+    ) -> Result<mesh::outlet::Response, Error> {
         if let ExchangeKind::None = request.kind {
         } else {
-            self.inlet.send(mesh::inlet::Frame(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
+            self.skel.inlet.send(mesh::inlet::Frame::Log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
         }
         let mut request = request;
         let exchangeId: ExchangeId = Uuid::new_v4().to_string();
         request.kind = ExchangeKind::RequestResponse(exchangeId.clone());
         let (tx,rx) = oneshot::channel();
-        self.exchanges.insert(exchangeId, tx);
-        self.inlet.send(mesh::inlet::Frame::Request(request));
+        self.skel.exchanges.insert(exchangeId, tx);
+        self.skel.inlet.send(mesh::inlet::Frame::Request(request));
 
-        let result = tokio::time::timeout(Duration::from_secs(self.info.config.response_timeout.clone()),rx).await;
+        let result = tokio::time::timeout(Duration::from_secs(self.skel.info.config.response_timeout.clone()),rx).await;
         Ok(result??)
+    }
+
+    pub fn respond( &self, response: mesh::inlet::Response ) {
+        self.skel.inlet.send( mesh::inlet::Frame::Response(response) );
     }
 }
 
@@ -192,12 +230,12 @@ pub struct Request {
     pub entity: Entity,
     pub kind: ExchangeKind,
     tx: oneshot::Sender<mesh::inlet::Response>,
-    logger: fn(message: String),
+    logger: fn(message: &str ),
 }
 
 impl Request {
 
-    pub fn from( request: mesh::outlet::Request, tx: oneshot::Sender<mesh::inlet::Response>, logger: fn(message:String) ) -> Self {
+    pub fn from( request: mesh::outlet::Request, tx: oneshot::Sender<mesh::inlet::Response>, logger: fn(message: &str ) ) -> Self {
         Self {
             from: request.from,
             port: request.port,
@@ -218,12 +256,11 @@ impl Request {
         if self.can_reply() {
             self.respond(Signal::Error(message));
         } else {
-            logger(
+            (self.logger)(
                 format!(
                     "SEVERE: cannot respond with error to request notification message: '{}'",
                     message
-                )
-                .as_str(),
+                ).as_str()
             );
         }
     }
@@ -246,32 +283,33 @@ impl Request {
             Ok(())
         } else {
             Err(
-                "a request can only be responded to if it is kind == ExchangeKind::RequestResponse"
-                    .into(),
+                anyhow!("a request can only be responded to if it is kind == ExchangeKind::RequestResponse")
             )
         }
     }
 }
 
 pub mod example {
-    use crate::error::Error;
-    use crate::{PortalCtrl, PortalInlet, Request};
+    use crate::{PortalCtrl, InletApi, Request, PortalSkel};
     use resource_mesh_portal_serde::config::Info;
     use resource_mesh_portal_serde::{mesh, Entity, ExtOperation, Operation, PortRequest, Signal, Payload};
     use std::sync::Arc;
+    use anyhow::Error;
 
     pub struct HelloCtrl {
-        pub portal_inlet: Arc<PortalInlet>,
+        pub skel: Arc<PortalSkel>,
+        pub inlet_api: InletApi
     }
 
     impl HelloCtrl {
-        fn new(portal_inlet: Arc<PortalInlet>) -> Box<Self> {
-            Box::new(Self { portal_inlet })
+        fn new(skel: Arc<PortalSkel>, inlet_api: InletApi) -> Box<Self> {
+            Box::new(Self { skel, inlet_api })
         }
     }
 
+    #[async_trait]
     impl PortalCtrl for HelloCtrl {
-        async fn init(&mut self, info: Info) -> Result<(), Error> {
+        async fn init(&mut self) -> Result<(), Error> {
             let mut request =
                 mesh::inlet::Request::new(Operation::Ext(ExtOperation::Port(PortRequest {
                     port: "hello-world".to_string(),
@@ -279,14 +317,14 @@ pub mod example {
                 })));
 
             // send this request to itself
-            request.to.push( info.key.clone() );
+            request.to.push( self.inlet_api.skel.info.key.clone() );
 
-            let response = self.portal_inlet.exchange(request).await?;
+            let response = self.inlet_api.exchange(request).await?;
 
             if let Signal::Ok(Entity::Payload(Payload::Text(text))) = response.signal {
-                println!(text);
+                println!("{}",text);
             } else {
-                return Err("unexpected signal".into());
+                return Err(anyhow!("unexpected signal"));
             }
 
             Ok(())

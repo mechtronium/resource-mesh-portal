@@ -14,4 +14,6 @@ description = "A server library for the Resource Mesh Portal API."
 resource-mesh-portal-serde = { path = "../resource-mesh-portal-serde", version= "0.0.1"}
 tokio = { version = "1.4.0", features = ["full"] }
 uuid = { version = "0.8.2", features = ["serde", "v4", "wasm-bindgen"] }
+futures = "0.3.13"
+anyhow = "1.0.44"
 

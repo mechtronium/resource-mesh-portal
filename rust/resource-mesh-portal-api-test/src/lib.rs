@@ -1,8 +1,15 @@
 #[cfg(test)]
 mod tests {
+    use resource_mesh_portal_api_server::{PortalMuxer, Message, MuxCall};
+
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn server_up() {
+        let mut muxer = PortalMuxer::new(router);
+        println!("muxer started.");
+    }
+
+    pub fn router( message: Message ) {
+
     }
 }
+

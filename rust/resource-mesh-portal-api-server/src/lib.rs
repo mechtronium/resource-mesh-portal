@@ -3,13 +3,13 @@ pub mod error;
 use resource_mesh_portal_serde::{mesh, Address, Key, Status, ExchangeId, ExchangeKind, Identifier, Operation, Log, Signal};
 use resource_mesh_portal_serde::config::{Config, BindConfig, Info};
 use tokio::sync::mpsc;
-use crate::error::Error;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use futures::future::select_all;
-use futures::FutureExt;
+use futures::{FutureExt, SinkExt};
+use anyhow::Error;
 
 pub enum PortalStatus{
     None,
@@ -21,10 +21,11 @@ pub enum PortalStatus{
 pub fn log( log: Log) {
     match log {
         Log::Info(message) => {
-            println!(message);
+            println!("{}",message);
+
         }
         Log::Fatal(message) => {
-            eprintln!(message);
+            eprintln!("{}",message);
         }
     }
 }
@@ -150,6 +151,9 @@ impl Portal {
                                 mesh::inlet::Frame::EndCli(_) => {}
                                 mesh::inlet::Frame::Request(request) => {
                                     match &request.kind {
+                                        ExchangeKind::None=> {
+                                            logger(Log::Fatal("FATAL: received request with an invalid 'ExchangeKind::None'".to_string()))
+                                        }
                                         ExchangeKind::Notification => {
                                             for to in &request.to {
                                                 let request = Request::from( request.clone(), info.key.clone(), to.clone() );
@@ -188,7 +192,8 @@ impl Portal {
                                             logger(Log::Fatal(format!("FATAL: missing request/response exchange id '{}'", response.exchange_id)));
                                         }
                                         Some(tx) => {
-                                            tx.send(response);
+                                            let mut tx = tx;
+                                            tx.send(response)
                                         }
                                     }
                                 }
@@ -218,17 +223,17 @@ impl Portal {
             status_rx,
             status: PortalStatus::None,
             log: logger,
-            mux_tx: request_tx,
-            mux_rx: request_rx
+            mux_tx,
+            mux_rx
         }
     }
 
-    pub async fn send(&self, frame: mesh::outlet::Frame ) -> Result<(),Error> {
-        self.outlet_tx.send_timeout(frame, self.info.config.frame_timeout.clone() ).await?;
+    pub async fn send(&self, frame: mesh::outlet::Frame ) -> Result<(), Error> {
+        self.outlet_tx.send_timeout(frame, Duration::from_secs( self.info.config.frame_timeout.clone() ) ).await?;
         Ok(())
     }
 
-    pub async fn exchange(&self, request: mesh::outlet::Request ) -> Result<mesh::inlet::Response,Error> {
+    pub async fn exchange(&self, request: mesh::outlet::Request ) -> Result<mesh::inlet::Response, Error> {
         let mut request = request;
         let exchangeId: ExchangeId = Uuid::new_v4().to_string();
         request.kind = ExchangeKind::RequestResponse(exchangeId.clone());
@@ -247,7 +252,7 @@ impl Portal {
         self.outlet_tx.try_send(mesh::outlet::Frame::Shutdown).unwrap_or(());
     }
 
-    pub async fn init(&mut self) -> Result<(),Error> {
+    pub async fn init(&mut self) -> Result<(), Error> {
         if self.status != Status::Unknown {
             return Err(format!("{} has already received the init signal.",self.kind.to_string()).into());
         }
@@ -266,12 +271,12 @@ impl Portal {
                         Ok(Ok(status)) => {
                             status
                         }
-                        Ok(Result::Err(error)) => {
+                        Ok(Result::Err(err)) => {
                             tx.send(Result::Err(format!("ERROR: when waiting for {} status: 'Ready' message: '{}'",kind.to_string(),err.to_string())) );
                             return;
                         }
                         Err(err) => {
-                            tx.send(Result::Err(format!("PANIC: {} init timeout after '{}' seconds", kind.to_string(), message).into()) );
+                            tx.send(Result::Err(format!("PANIC: {} init timeout after '{}' seconds", kind.to_string(), config.init_timeout.clone() ).into()) );
                             return;
                         }
                     }

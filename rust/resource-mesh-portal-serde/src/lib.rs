@@ -67,7 +67,7 @@ pub mod resource {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum Operation {
-    Resource(mesh::inlet::Operation),
+    Resource(mesh::inlet::resource::Operation),
     Ext(ExtOperation)
 }
 
