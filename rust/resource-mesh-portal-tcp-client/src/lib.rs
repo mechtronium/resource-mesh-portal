@@ -18,7 +18,6 @@ use resource_mesh_portal_serde::version;
 
 pub struct PortalTcpClient {
     pub host: String,
-    pub client: Box<dyn PortalClient>,
     pub portal: Arc<Portal>
 }
 
@@ -72,32 +71,35 @@ impl PortalTcpClient {
             });
         }
 
-        {
-            let logger = client.logger();
-            tokio::spawn(async move {
-                while let Result::Ok(frame) = reader.read().await {
-                    match outlet_tx.try_send( frame ) {
-                        Result::Ok(_) => {}
-                        Result::Err(err) => {
-                            (logger)("FATAL: reader disconnected");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-
 
         let inlet = Box::new(TcpInlet{
           sender: inlet_tx,
            logger: client.logger()
         });
 
+
         if let mesh::outlet::Frame::Init(info) = reader.read( ).await?  {
-            let portal = Portal::new( info, inlet, |skel,inlet_api  | { client.portl_ctrl(skel,inlet_api)} , client.logger()).await?;
+            let portal = Portal::new(info, inlet, client.portal_ctrl_factory(), client.logger()).await?;
+
+
+            {
+                let logger = client.logger();
+                tokio::spawn(async move {
+                    while let Result::Ok(frame) = reader.read().await {
+                        match outlet_tx.try_send( frame ) {
+                            Result::Ok(_) => {}
+                            Result::Err(err) => {
+                                (logger)("FATAL: reader disconnected");
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+
+
             return Ok(Self {
                 host,
-                client,
                 portal
             });
         } else {
@@ -112,7 +114,7 @@ impl PortalTcpClient {
 trait PortalClient {
     fn flavor(&self) -> String;
     async fn auth( &self, reader: & mut PrimitiveFrameReader, writer: & mut PrimitiveFrameWriter ) -> Result<(),Error>;
-    fn portl_ctrl(&self, skel: Arc<PortalSkel>, inlet_api: InletApi) -> Box<dyn PortalCtrl>;
+    fn portal_ctrl_factory(&self)->fn( skel: Arc<PortalSkel>, inlet_api: InletApi) -> Box<dyn PortalCtrl>;
     fn logger(&self) -> fn(message: &str);
 }
 
