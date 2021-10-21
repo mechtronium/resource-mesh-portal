@@ -2,6 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/resource-mesh-portal-tcp-client/resource-mesh-portal-tcp-client.iml" filepath="$PROJECT_DIR$/resource-mesh-portal-tcp-client/resource-mesh-portal-tcp-client.iml" />
+      <module fileurl="file://$PROJECT_DIR$/resource-mesh-portal-tcp-server/resource-mesh-portal-tcp-server.iml" filepath="$PROJECT_DIR$/resource-mesh-portal-tcp-server/resource-mesh-portal-tcp-server.iml" />
       <module fileurl="file://$PROJECT_DIR$/rust.iml" filepath="$PROJECT_DIR$/rust.iml" />
     </modules>
   </component>

@@ -11,6 +11,10 @@ description = "The raw data types for resource-mesh-portal-api serde."
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+lazy_static = "1.4.0"
 serde = { version="1.0.69", features=['derive','rc'] }
 strum = "0.21.0"
 strum_macros = "0.21.1"
+nom = "7"
+anyhow = "1.0.44"
+bincode = "1.3.3"

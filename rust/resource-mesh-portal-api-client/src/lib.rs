@@ -4,25 +4,45 @@ extern crate async_trait;
 #[macro_use]
 extern crate anyhow;
 
-use resource_mesh_portal_serde::config::{Info};
-use resource_mesh_portal_serde::mesh::outlet::Frame;
-use resource_mesh_portal_serde::{
-    mesh, Entity, ExchangeId, ExchangeKind, Identifier, Log, Port, Signal, Status,
-};
+
 
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use anyhow::Error;
+use dashmap::DashMap;
 use tokio::sync::oneshot;
 use uuid::Uuid;
-use dashmap::DashMap;
-use anyhow::Error;
+
+use resource_mesh_portal_serde::version::v0_0_1::{Entity, ExchangeId, ExchangeKind, Identifier, Log, mesh, Port, Signal, Status, ExtOperation, PortRequest};
+use resource_mesh_portal_serde::version::v0_0_1::config::Info;
+use resource_mesh_portal_serde::version::v0_0_1::mesh::outlet::Frame;
+use std::prelude::rust_2021::TryFrom;
+use std::ops::Deref;
+use resource_mesh_portal_serde::version::v0_0_1::http::{HttpRequest, HttpResponse};
+use std::collections::HashMap;
+use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::Response;
 
 
 #[async_trait]
 pub trait PortalCtrl : Sync+Send {
-    async fn init(&mut self) -> Result<(), Error>;
-    async fn request(&self, request: Request ) -> Result<(), Error>;
+    async fn init(&mut self) -> Result<(), Error>
+    {
+        Ok(())
+    }
+
+    fn ports(&self) -> HashMap<String,fn( request: Request<PortRequest> ) -> Result<Option<mesh::inlet::Response>,Error>> {
+        HashMap::new()
+    }
+
+    async fn http_request( &self, request: Request<HttpRequest> ) -> Result<HttpResponse,Error> {
+        let response = HttpResponse {
+            headers: Default::default(),
+            code: 404,
+            body: None
+        };
+        Ok(response)
+    }
 }
 
 pub fn log(message: &str) {
@@ -75,7 +95,8 @@ impl PortalSkel {
 pub struct Portal {
     pub skel: Arc<PortalSkel>,
     pub ctrl: Arc<dyn PortalCtrl>,
-    pub inlet_api: Arc<InletApi>
+    pub inlet_api: Arc<InletApi>,
+    pub ports: HashMap<String,fn( request: Request<PortRequest> ) -> Result<Option<mesh::inlet::Response>,Error>>,
 }
 
 impl Portal {
@@ -99,13 +120,15 @@ impl Portal {
 
         let inlet_api = InletApi::new(skel.clone() );
         let mut ctrl = ctrl_factory(skel.clone(), inlet_api);
-        ctrl.init();
+        let ports = ctrl.ports();
+        ctrl.init().await?;
         let ctrl = ctrl.into();
         let inlet_api = Arc::new(InletApi::new(skel.clone() ));
         let portal = Self {
             skel: skel.clone(),
             ctrl,
-            inlet_api
+            inlet_api,
+            ports
         };
 
         Ok(Arc::new(portal))
@@ -127,20 +150,128 @@ impl Outlet for Portal {
                     let ctrl = self.ctrl.clone();
                     let inlet_api = self.inlet_api.clone();
                     let skel = self.skel.clone();
+                    let context = RequestContext::new(skel.info.clone(), skel.logger );
+                    let ports = self.ports.clone();
+                    let from = request.from.clone();
+                    let kind = request.kind.clone();
                     tokio::spawn( async move {
-                        let (tx, rx) = oneshot::channel();
-                        let request = Request::from(request, tx, skel.logger );
-                        match ctrl.request(request).await {
-                            Ok(_) => {
-                                tokio::spawn(async move {
-                                    let result = rx.await;
-                                    if let Result::Ok(response) = result {
-                                        inlet_api.respond( response );
+                        match request.operation.clone() {
+                            ExtOperation::Http(_) => {
+                                if let ExchangeKind::RequestResponse(exchange_id) = &kind
+                                {
+                                    let result = Request::try_from_http(request, context);
+                                    match result {
+                                        Ok(request) => {
+                                            let path = request.path.clone();
+                                            let result = ctrl.http_request(request).await;
+                                            match result {
+                                                Ok(response) => {
+                                                    let response = mesh::inlet::Response {
+                                                        to: from,
+                                                        exchange_id:exchange_id.clone(),
+                                                        signal: Signal::Ok(Entity::HttpResponse(response))
+                                                    };
+                                                    inlet_api.respond( response );
+                                                }
+                                                Err(err) => {
+                                                    (skel.logger)(format!("ERROR: HttpRequest.path: '{}' error: '{}' ",  path, err.to_string()).as_str());
+                                                    let response = mesh::inlet::Response {
+                                                        to: from,
+                                                        exchange_id:exchange_id.clone(),
+                                                        signal: Signal::Ok(Entity::HttpResponse(HttpResponse::server_side_error()))
+                                                    };
+                                                    inlet_api.respond( response );
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            (skel.logger)(format!("FATAL: could not modify HttpRequest into Request<HttpRequest>: {}", err.to_string()).as_str());
+                                        }
                                     }
-                                });
+                                } else {
+                                    (skel.logger)("FATAL: http request MUST be of ExchangeKind::RequestResponse");
+                                }
                             }
-                            Err(error) => {
-                                inlet_api.log(Log::Error(error.to_string()));
+                            ExtOperation::Port(port_request) => {
+                                match ports.get(&port_request.port ) {
+                                    Some(port) => {
+                                        let result = Request::try_from_port(request, context );
+                                        match result {
+                                            Ok(request) => {
+                                                let result = (*port)(request);
+                                                match result {
+                                                    Ok(response) => {
+                                                        match response {
+                                                            Some(response) => {
+                                                                if let ExchangeKind::RequestResponse(exchange_id) = &kind
+                                                                {
+                                                                   inlet_api.respond(response);
+                                                                } else {
+                                                                    let message = format!("WARN: PortRequest.port '{}' generated a response to a ExchangeKind::Notification", port_request.port);
+                                                                    (skel.logger)(message.as_str());
+                                                                }
+                                                            }
+                                                            None => {
+                                                                let message = format!("ERROR: PortRequest.port '{}' generated no response", port_request.port);
+                                                                (skel.logger)(message.as_str());
+                                                                if let ExchangeKind::RequestResponse(exchange_id) = &kind
+                                                                {
+                                                                    let response = mesh::inlet::Response {
+                                                                        to: from,
+                                                                        exchange_id: exchange_id.clone(),
+                                                                        signal: Signal::Error(message)
+                                                                    };
+                                                                    inlet_api.respond(response);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(err) => {
+                                                        let message = format!("ERROR: PortRequest.port '{}' message: '{}'", port_request.port, err.to_string());
+                                                        (skel.logger)(message.as_str());
+                                                        if let ExchangeKind::RequestResponse(exchange_id) = &kind
+                                                        {
+                                                            let response = mesh::inlet::Response {
+                                                                to: from,
+                                                                exchange_id: exchange_id.clone(),
+                                                                signal: Signal::Error(message)
+                                                            };
+                                                            inlet_api.respond(response);
+                                                        }
+                                                    }
+                                                }
+
+                                            }
+                                            Err(err) => {
+                                                let message = format!("FATAL: could not modify PortRequest into Request<PortRequest>: {}", err.to_string());
+                                                (skel.logger)(message.as_str());
+                                                if let ExchangeKind::RequestResponse(exchange_id) = &kind
+                                                {
+                                                    let response = mesh::inlet::Response {
+                                                        to: from,
+                                                        exchange_id: exchange_id.clone(),
+                                                        signal: Signal::Error(message)
+                                                    };
+                                                    inlet_api.respond(response);
+                                                }
+                                            }
+                                        }
+
+                                    }
+                                    None => {
+                                        let message =format!("ERROR: message port: '{}' not defined ", port_request.port );
+                                        (skel.logger)(message.as_str());
+                                        if let ExchangeKind::RequestResponse(exchange_id) = &kind
+                                        {
+                                            let response = mesh::inlet::Response {
+                                                to: from,
+                                                exchange_id: exchange_id.clone(),
+                                                signal: Signal::Error(message)
+                                            };
+                                            inlet_api.respond(response);
+                                        }
+                                    }
+                                }
                             }
                         }
                     });
@@ -149,7 +280,7 @@ impl Outlet for Portal {
                     if let Option::Some((_,tx)) =
                         self.skel.exchanges.remove(&response.exchange_id)
                     {
-                        tx.send(response);
+                        tx.send(response).unwrap_or(());
                     } else {
                         (self.skel.logger)("SEVERE: do not have a matching exchange_id for response");
                     }
@@ -207,10 +338,10 @@ impl InletApi {
             self.skel.inlet.send(mesh::inlet::Frame::Log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
         }
         let mut request = request;
-        let exchangeId: ExchangeId = Uuid::new_v4().to_string();
-        request.kind = ExchangeKind::RequestResponse(exchangeId.clone());
+        let exchange_id: ExchangeId = Uuid::new_v4().to_string();
+        request.kind = ExchangeKind::RequestResponse(exchange_id.clone());
         let (tx,rx) = oneshot::channel();
-        self.skel.exchanges.insert(exchangeId, tx);
+        self.skel.exchanges.insert(exchange_id, tx);
         self.skel.inlet.send(mesh::inlet::Frame::Request(request));
 
         let result = tokio::time::timeout(Duration::from_secs(self.skel.info.config.response_timeout.clone()),rx).await;
@@ -222,77 +353,76 @@ impl InletApi {
     }
 }
 
-pub struct Request {
-    pub from: Identifier,
-    pub port: Port,
-    pub entity: Entity,
-    pub kind: ExchangeKind,
-    tx: oneshot::Sender<mesh::inlet::Response>,
-    logger: fn(message: &str ),
+#[derive(Clone)]
+pub struct RequestContext{
+    pub portal_info: Info,
+    pub logger: fn(message: &str),
 }
 
-impl Request {
-
-    pub fn from( request: mesh::outlet::Request, tx: oneshot::Sender<mesh::inlet::Response>, logger: fn(message: &str ) ) -> Self {
+impl RequestContext {
+    pub fn new( portal_info: Info, logger: fn(message: &str) ) -> Self {
         Self {
-            from: request.from,
-            port: request.port,
-            entity: request.entity,
-            kind: request.kind,
-            tx,
-            logger,
-        }
-    }
-
-    pub fn ok(self) {
-        if self.can_reply() {
-            self.respond(Signal::Ok(Entity::Empty));
-        }
-    }
-
-    pub fn error(self, message: String) {
-        if self.can_reply() {
-            self.respond(Signal::Error(message));
-        } else {
-            (self.logger)(
-                format!(
-                    "SEVERE: cannot respond with error to request notification message: '{}'",
-                    message
-                ).as_str()
-            );
-        }
-    }
-
-    pub fn can_reply(&self) -> bool {
-        match self.kind {
-            ExchangeKind::RequestResponse(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn respond(self, signal: Signal) -> Result<(), Error> {
-        if let ExchangeKind::RequestResponse(exchange) = &self.kind {
-            let response = mesh::inlet::Response {
-                to: self.from.clone(),
-                exchange_id: exchange.clone(),
-                signal,
-            };
-            self.tx.send(response);
-            Ok(())
-        } else {
-            Err(
-                anyhow!("a request can only be responded to if it is kind == ExchangeKind::RequestResponse")
-            )
+            portal_info,
+            logger
         }
     }
 }
+
+pub struct Request<REQUEST> {
+    pub context: RequestContext,
+    pub from: Identifier,
+    pub request: REQUEST
+}
+
+impl <REQUEST> Deref for Request<REQUEST> {
+    type Target = REQUEST;
+
+    fn deref(&self) -> &Self::Target {
+        &self.request
+    }
+}
+
+impl Request<HttpRequest> {
+    pub fn try_from_http(request: mesh::outlet::Request, context: RequestContext) -> Result<Request<HttpRequest>, Error> {
+        if let ExtOperation::Http(http_request) = request.operation {
+            Ok(Self {
+                context,
+                from: request.from,
+                request: http_request,
+            })
+        } else {
+            Err(anyhow!("can only create Request<PortRequest> from ExtOperation::Port"))
+        }
+    }
+}
+
+impl Request<PortRequest> {
+    pub fn try_from_port( request: mesh::outlet::Request, context: RequestContext ) -> Result<Request<PortRequest>,Error> {
+
+        if let ExtOperation::Port( port_request ) = request.operation {
+            Ok(Self {
+                context,
+                from: request.from,
+                request: port_request,
+            })
+        } else {
+            Err(anyhow!("can only create Request<PortRequest> from ExtOperation::Port"))
+        }
+    }
+}
+
 
 pub mod example {
-    use crate::{PortalCtrl, InletApi, Request, PortalSkel};
-    
-    use resource_mesh_portal_serde::{mesh, Entity, ExtOperation, Operation, PortRequest, Signal, Payload};
     use std::sync::Arc;
+
     use anyhow::Error;
+
+    use resource_mesh_portal_serde::version::v0_0_1::{Entity, ExtOperation, mesh, Payload, PortRequest, Signal, Identifier};
+
+    use crate::{InletApi, PortalCtrl, PortalSkel, Request};
+    use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
+    use resource_mesh_portal_serde::version::v0_0_1::http::{HttpRequest, HttpResponse};
+    use std::collections::HashMap;
 
     pub struct HelloCtrl {
         pub skel: Arc<PortalSkel>,
@@ -300,13 +430,15 @@ pub mod example {
     }
 
     impl HelloCtrl {
+        #[allow(dead_code)]
         fn new(skel: Arc<PortalSkel>, inlet_api: InletApi) -> Box<Self> {
-            Box::new(Self { skel, inlet_api })
+            Box::new(Self { skel, inlet_api } )
         }
     }
 
     #[async_trait]
     impl PortalCtrl for HelloCtrl {
+
         async fn init(&mut self) -> Result<(), Error> {
             let mut request =
                 mesh::inlet::Request::new(Operation::Ext(ExtOperation::Port(PortRequest {
@@ -315,7 +447,7 @@ pub mod example {
                 })));
 
             // send this request to itself
-            request.to.push( self.inlet_api.skel.info.key.clone() );
+            request.to.push( Identifier::Key(self.inlet_api.skel.info.key.clone()) );
 
             let response = self.inlet_api.exchange(request).await?;
 
@@ -328,16 +460,12 @@ pub mod example {
             Ok(())
         }
 
-        async fn request(&self, request: Request) -> Result<(), Error> {
-            match request.port.as_str() {
-                "hello-world" => {
-                    request.respond(Signal::Ok(Entity::Payload(Payload::Text("Hello World!".to_string()))) );
-                }
-                _ => {
-                    request.error("unrecognized port".to_string() );
-                }
-            }
-            Ok(())
+
+    }
+
+    impl HelloCtrl {
+        fn hello_world( &self, request: Request<PortRequest> ) {
+
         }
     }
 }
