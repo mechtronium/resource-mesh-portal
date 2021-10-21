@@ -287,7 +287,7 @@ impl Outlet for Portal {
                     }
                 }
                 Frame::BinParcel(_) => {}
-                Frame::Shutdown => {}
+                Frame::Close(_) => {}
                 _ => {
                     (self.skel.logger)(format!("SEVERE: frame ignored because status: '{}' does not allow handling of frame '{}'",self.skel.status().to_string(),frame.to_string()).as_str());
                 }

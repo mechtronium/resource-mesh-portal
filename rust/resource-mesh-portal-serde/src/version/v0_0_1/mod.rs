@@ -70,7 +70,8 @@ pub enum Status {
  Unknown,
  Initializing,
  Ready,
- Panic(String)
+ Panic(String),
+ Done
 }
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -92,6 +93,11 @@ impl ToString for Log {
     }
 }
 
+#[derive(Debug,Clone,Serialize,Deserialize,strum_macros::Display)]
+pub enum CloseReason {
+    Done,
+    Error(String),
+}
 
 pub mod resource {
     use serde::{Deserialize, Serialize};
@@ -363,7 +369,7 @@ pub mod mesh {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, Signal, Status};
+        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, Signal, Status, CloseReason};
         use crate::version::v0_0_1::mesh::inlet::resource::Operation;
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -397,7 +403,8 @@ pub mod mesh {
             Request(Request),
             Response(Response),
             Status(Status),
-            BinParcel(BinParcel)
+            BinParcel(BinParcel),
+            Close(CloseReason)
         }
 
         impl TryInto<PrimitiveFrame> for Frame {
@@ -493,7 +500,7 @@ pub mod mesh {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, Signal};
+        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, Signal, CloseReason};
         use crate::version::v0_0_1::config::Info;
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -523,6 +530,8 @@ pub mod mesh {
             Exit(i32)
         }
 
+
+
         #[derive(Debug,Clone,Serialize,Deserialize,strum_macros::Display)]
         pub enum Frame {
             Init(Info),
@@ -530,7 +539,7 @@ pub mod mesh {
             Request(Request),
             Response(Response),
             BinParcel(BinParcel),
-            Shutdown
+            Close(CloseReason)
         }
 
         impl TryInto<PrimitiveFrame> for Frame {

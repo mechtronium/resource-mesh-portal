@@ -27,21 +27,17 @@ impl PortalTcpClient {
 
     pub async fn new( host: String, client: Box<dyn PortalClient> ) -> Result<Self,Error> {
         let stream = TcpStream::connect(host.clone()).await?;
-println!("CLIENT: connection made: {}", host );
 
         let (reader,writer) = stream.into_split();
         let mut reader = PrimitiveFrameReader::new(reader);
         let mut writer = PrimitiveFrameWriter::new(writer);
 
-println!("CLIENT: writing flavor: {}", client.flavor() );
 
         writer.write_string(client.flavor()).await?;
 
          tokio::time::sleep(Duration::from_secs(0)).await;
 
-        println!("CLIENT: waiting for read flavor result..." );
         let result = reader.read_string().await?;
-println!("CLIENT: flavor result : {}", client.flavor() );
 
         tokio::time::sleep(Duration::from_secs(0)).await;
 
@@ -51,12 +47,7 @@ println!("CLIENT: flavor result : {}", client.flavor() );
             return Err(anyhow!(message));
         }
 
-        if true {
-            return Err(anyhow!("ERROR"));
-        }
-
         client.auth(&mut reader, &mut writer).await?;
-
 
         tokio::time::sleep(Duration::from_secs(0)).await;
 

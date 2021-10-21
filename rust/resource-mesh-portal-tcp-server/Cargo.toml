@@ -12,3 +12,5 @@ resource-mesh-portal-tcp-common = { path = "../resource-mesh-portal-tcp-common",
 anyhow = "1.0.44"
 tokio = { version = "1.4.0", features = ["full"] }
 async-trait = "0.1.48"
+strum = "0.21.0"
+strum_macros = "0.21.1"

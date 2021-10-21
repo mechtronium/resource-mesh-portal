@@ -10,13 +10,14 @@ use anyhow::Error;
 use futures::future::select_all;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
-use tokio::sync::mpsc::error::SendTimeoutError;
+use tokio::sync::mpsc::error::{SendTimeoutError, SendError};
 use uuid::Uuid;
 
-use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, ExtOperation, Identifier, IdentifierKind, Identifiers, Key, Log, mesh, Signal, Status};
+use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, ExtOperation, Identifier, IdentifierKind, Identifiers, Key, Log, mesh, Signal, Status, CloseReason};
 use resource_mesh_portal_serde::version::v0_0_1::config::Info;
 use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
 use resource_mesh_portal_serde::version::v0_0_1::mesh::outlet::Frame;
+use std::future::Future;
 
 #[derive(Clone,Eq,PartialEq,Hash)]
 pub enum PortalStatus{
@@ -154,13 +155,10 @@ impl Portal {
     }
 
     pub fn new( info: Info, outlet_tx: mpsc::Sender<mesh::outlet::Frame>, inlet_rx: mpsc::Receiver<mesh::inlet::Frame>, logger: fn(log:Log) ) -> Self {
-        let key = info.key.clone();
-        let address = info.address.clone();
-        let kind = info.kind.clone();
 
-        let (mux_tx,mux_rx) = tokio::sync::mpsc::channel(128);
-        let (status_tx,status_rx) = tokio::sync::broadcast::channel(1);
-        let (call_tx,mut call_rx) = tokio::sync::mpsc::channel(128);
+        let (mux_tx,mux_rx) = tokio::sync::mpsc::channel(1024);
+        let (status_tx,status_rx) = tokio::sync::broadcast::channel(8);
+        let (call_tx,mut call_rx) = tokio::sync::mpsc::channel(1024);
         {
             let command_tx = call_tx.clone();
             let mut inlet_rx = inlet_rx;
@@ -182,6 +180,15 @@ impl Portal {
             let info = info.clone();
             let status_tx = status_tx.clone();
             tokio::spawn(async move {
+
+                match outlet_tx.send( mesh::outlet::Frame::Init(info.clone())).await {
+                    Result::Ok(_) => {}
+                    Result::Err(err) => {
+                        logger(Log::Fatal("FATAL: could not send Frame::Init".to_string()));
+                        mux_tx.try_send(MuxCall::Remove(Identifier::Key(info.key.clone()))).unwrap_or_default();
+                        return;
+                    }
+                }
                 while let Option::Some(command) = call_rx.recv().await {
                     match command {
                         PortalCall::FrameIn(frame) => {
@@ -242,6 +249,7 @@ impl Portal {
                                 mesh::inlet::Frame::Status(status) => {
                                     status_tx.send(status).unwrap_or_default();
                                 }
+                                mesh::inlet::Frame::Close(_) => {}
                             }
                         }
                         PortalCall::Exchange(exchange) => {
@@ -295,7 +303,7 @@ impl Portal {
 
 
     pub fn shutdown(&mut self) {
-        self.outlet_tx.try_send(mesh::outlet::Frame::Shutdown).unwrap_or(());
+        self.outlet_tx.try_send(mesh::outlet::Frame::Close(CloseReason::Done)).unwrap_or(());
     }
 
     pub async fn init(&mut self) -> Result<(), Error> {
