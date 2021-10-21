@@ -4,18 +4,22 @@ extern crate async_trait;
 #[macro_use]
 extern crate anyhow;
 
-use std::time::Duration;
-use resource_mesh_portal_api_server::{Portal, PortalMuxer, Message, MuxCall, Router};
-use anyhow::Error;
-use tokio::sync::mpsc;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::error::SendTimeoutError;
-use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
-use resource_mesh_portal_serde::version::v0_0_1::{PrimitiveFrame, mesh};
+use std::time::Duration;
+
+use anyhow::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::convert::{TryInto, TryFrom};
-use tokio::net::tcp::{OwnedWriteHalf, OwnedReadHalf};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendTimeoutError;
+
+use resource_mesh_portal_api_server::{Message, MuxCall, Portal, PortalMuxer, Router};
+use resource_mesh_portal_serde::version::v0_0_1::{mesh, PrimitiveFrame, Log};
+use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
+use resource_mesh_portal_tcp_common::{FrameReader, FrameWriter, PrimitiveFrameReader, PrimitiveFrameWriter};
+use resource_mesh_portal_serde::version::v0_0_1::config::Info;
 
 pub enum PortalServerCall {
     InjectMessage(Message<Operation>)
@@ -75,8 +79,8 @@ impl PortalTcpServer {
 
     async fn handle( muxer: &mpsc::Sender<MuxCall>, server: Arc<dyn PortalServer>, stream: TcpStream ) -> Result<(),Error> {
         let (reader, writer) = stream.into_split();
-        let mut reader = PrimitiveFrameRead::new(reader);
-        let mut writer = PrimitiveFrameWrite::new(writer);
+        let mut reader = PrimitiveFrameReader::new(reader);
+        let mut writer = PrimitiveFrameWriter::new(writer);
         let flavor = reader.read_string().await?;
 
         // first verify flavor matches
@@ -86,16 +90,57 @@ impl PortalTcpServer {
             return Err(anyhow!(message));
         }
 
-        writer.write_string( "OK".to_string() ).await?;
+        writer.write_string( "Ok".to_string() ).await?;
 
         match server.auth(&mut reader, &mut writer).await
         {
             Ok(user) => {
-                writer.write_string( "OK".to_string() ).await?;
-                let reader = FrameReader::new(reader );
-                let writer = FrameWriter::new(writer);
-                match server.portal(user.clone(), reader, writer).await {
-                    Ok(portal) => {
+                writer.write_string( "Ok".to_string() ).await?;
+
+                let mut reader : FrameReader<mesh::inlet::Frame> = FrameReader::new(reader );
+                let mut writer : FrameWriter<mesh::outlet::Frame>  = FrameWriter::new(writer );
+
+
+                match server.info(user.clone() ).await {
+                    Ok(info) => {
+
+                        let (outlet_tx,mut outlet_rx) = mpsc::channel(128);
+                        let (inlet_tx,inlet_rx) = mpsc::channel(128);
+
+                        fn logger( log: Log ) {
+                            println!("{}", log.to_string() );
+                        }
+
+                        let portal = Portal::new(info, outlet_tx, inlet_rx, logger );
+
+                        let mut reader = reader;
+                        {
+                            let logger = server.logger();
+                            tokio::spawn(async move {
+                                while let Result::Ok(frame) = reader.read().await {
+                                    let result = inlet_tx.try_send(frame);
+                                    if result.is_err() {
+                                        (logger)("FATAL: cannot send frame to portal inlet_tx");
+                                        return;
+                                    }
+                                }
+                            });
+                        }
+
+                        let mut writer= writer;
+                        {
+                            let logger = server.logger();
+                            tokio::spawn(async move {
+                                while let Option::Some(frame) = outlet_rx.recv().await {
+                                    let result = writer.write(frame).await;
+                                    if result.is_err() {
+                                        (logger)("FATAL: cannot wwrite frame to frame writer");
+                                        return;
+                                    }
+                                }
+                            });
+                        }
+
                         match muxer.try_send(MuxCall::Add(portal)) {
                             Err(err) => {
                                 (server.logger())(err.to_string().as_str())
@@ -144,126 +189,9 @@ impl Router for RouterProxy {
 #[async_trait]
 pub trait PortalServer: Sync+Send {
     fn flavor(&self) -> String;
-    async fn auth(&self, reader: &mut PrimitiveFrameRead, writer: &mut PrimitiveFrameWrite ) -> Result<String,Error>;
-    async fn portal(&self, user: String, reader: FrameReader, writer: FrameWriter ) -> Result<Portal,Error>;
+    async fn auth(&self, reader: &mut PrimitiveFrameReader, writer: &mut PrimitiveFrameWriter) -> Result<String,Error>;
     fn route_to_mesh(&self, message: Message<Operation>);
     fn logger(&self) -> fn(message: &str);
-}
-
-pub struct FrameWriter {
-    stream: PrimitiveFrameWrite
-}
-
-impl FrameWriter {
-    pub fn new(stream: PrimitiveFrameWrite) -> Self {
-        Self {
-            stream
-        }
-    }
-
-    /*
-    pub async fn read( &mut self ) -> Result<mesh::inlet::Frame,Error> {
-        let frame = self.stream.read().await?;
-        Ok(mesh::inlet::Frame::try_from(frame)?)
-    }
-     */
-
-    pub async fn write( &mut self, frame: mesh::outlet::Frame ) -> Result<(),Error> {
-        let frame = frame.try_into()?;
-        self.stream.write(frame).await
-    }
-}
-
-pub struct FrameReader{
-    stream: PrimitiveFrameRead
-}
-
-impl FrameReader {
-    pub fn new(stream: PrimitiveFrameRead ) -> Self {
-        Self {
-            stream
-        }
-    }
-
-    pub async fn read( &mut self ) -> Result<mesh::inlet::Frame,Error> {
-        let frame = self.stream.read().await?;
-        Ok(mesh::inlet::Frame::try_from(frame)?)
-    }
-
-}
-
-pub struct PrimitiveFrameRead {
-    read: OwnedReadHalf
-}
-
-impl PrimitiveFrameRead {
-
-    pub fn new(read: OwnedReadHalf ) -> Self {
-        Self {
-           read
-        }
-    }
-
-    pub async fn read(&mut self) -> Result<PrimitiveFrame,Error> {
-        let size = self.read.read_u32().await? as usize;
-        let mut vec: Vec<u8> = Vec::with_capacity(size );
-        let buf = vec.as_mut_slice();
-        self.read.read(buf).await?;
-        Result::Ok(PrimitiveFrame {
-            size: size as u32,
-            data: vec
-        })
-    }
-
-    pub async fn read_string(&mut self) -> Result<String,Error> {
-        let frame = self.read().await?;
-        Ok(frame.try_into()?)
-    }
-
-
-}
-
-pub struct PrimitiveFrameWrite {
-    write: OwnedWriteHalf
-}
-
-impl PrimitiveFrameWrite {
-
-    pub fn new(write: OwnedWriteHalf) -> Self {
-        Self {
-            write
-        }
-    }
-
-    /*
-    pub async fn read(&mut self) -> Result<PrimitiveFrame,Error> {
-        let size = self.write.read_u32().await? as usize;
-        let mut vec: Vec<u8> = Vec::with_capacity(size );
-        let buf = vec.as_mut_slice();
-        self.write.read(buf).await?;
-        Result::Ok(PrimitiveFrame {
-            size: size as u32,
-            data: vec
-        })
-    }
-     */
-
-    pub async fn write( &mut self, frame: PrimitiveFrame ) -> Result<(),Error> {
-        self.write.write_u32(frame.size ).await?;
-        self.write.write_all(frame.data.as_slice() ).await?;
-        Ok(())
-    }
-
-    /*
-    pub async fn read_string(&mut self) -> Result<String,Error> {
-        let frame = self.read().await?;
-        Ok(frame.try_into()?)
-    }
-     */
-
-    pub async fn write_string(&mut self, string: String) -> Result<(),Error> {
-        let frame = string.into();
-        self.write(frame).await
-    }
+    async fn info(&self, user: String ) -> Result<Info,Error>;
 }
 

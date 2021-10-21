@@ -16,7 +16,8 @@ mod tests {
     use resource_mesh_portal_serde::version::v0_0_1::config::{Config, Info, PortalKind};
     use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
     use resource_mesh_portal_serde::version::v0_0_1::resource::Archetype;
-    use resource_mesh_portal_tcp_server::{ PortalServer, PortalTcpServer, PrimitiveFrameRead, PrimitiveFrameWrite, FrameWriter, FrameReader};
+    use resource_mesh_portal_tcp_server::{PortalServer, PortalTcpServer};
+    use resource_mesh_portal_tcp_common::{PrimitiveFrameReader, PrimitiveFrameWriter, FrameReader, FrameWriter};
 
     #[test]
     fn server_up() {
@@ -24,6 +25,7 @@ mod tests {
         rt.block_on(async {
             PortalTcpServer::new( 45678, Box::new( TestPortalServer::new() ));
         });
+        println!("server should be up...");
     }
 
     pub struct TestRouter {
@@ -58,12 +60,12 @@ mod tests {
             "test".to_string()
         }
 
-        async fn auth(&self, reader: &mut PrimitiveFrameRead, writer: &mut PrimitiveFrameWrite) -> Result<String, anyhow::Error> {
+        async fn auth(&self, reader: &mut PrimitiveFrameReader, writer: &mut PrimitiveFrameWriter) -> Result<String, anyhow::Error> {
             let username = reader.read_string().await?;
             Ok(username)
         }
 
-        async fn portal(&self, user: String, reader: FrameReader, writer: FrameWriter ) -> Result<Portal, anyhow::Error> {
+        async fn info(&self, user: String) -> Result<Info, anyhow::Error> {
             let index = self.atomic.fetch_add(1,Ordering::Relaxed);
             let key = format!("({})",index);
             let address = format!("portal-{}",index);
@@ -82,44 +84,7 @@ mod tests {
                 kind: PortalKind::Portal
             };
 
-            let (outlet_tx,mut outlet_rx) = mpsc::channel(128);
-            let (inlet_tx,inlet_rx) = mpsc::channel(128);
-
-            fn logger( log: Log ) {
-                println!("{}", log.to_string() );
-            }
-
-            let portal = Portal::new(info, outlet_tx, inlet_rx, logger );
-
-            let mut reader = reader;
-            {
-                let logger = self.logger();
-                tokio::spawn(async move {
-                    while let Result::Ok(frame) = reader.read().await {
-                        let result = inlet_tx.try_send(frame);
-                        if result.is_err() {
-                            (logger)("FATAL: cannot send frame to portal inlet_tx");
-                            return;
-                        }
-                    }
-                });
-            }
-
-            let mut writer= writer;
-            {
-                let logger = self.logger();
-                tokio::spawn(async move {
-                    while let Option::Some(frame) = outlet_rx.recv().await {
-                        let result = writer.write(frame).await;
-                        if result.is_err() {
-                            (logger)("FATAL: cannot wwrite frame to frame writer");
-                            return;
-                        }
-                    }
-                });
-            }
-
-            Ok(portal)
+            Ok(info)
         }
 
         fn route_to_mesh(&self, message: Message<Operation>) {

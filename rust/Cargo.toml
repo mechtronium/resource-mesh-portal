@@ -3,6 +3,7 @@ members = [
     "resource-mesh-portal-serde",
     "resource-mesh-portal-api-client",
     "resource-mesh-portal-api-server",
+    "resource-mesh-portal-tcp-common",
     "resource-mesh-portal-tcp-client",
     "resource-mesh-portal-tcp-server",
     "resource-mesh-portal-api-test",

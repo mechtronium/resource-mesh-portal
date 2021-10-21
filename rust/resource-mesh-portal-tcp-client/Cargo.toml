@@ -6,4 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+resource-mesh-portal-serde = { path = "../resource-mesh-portal-serde", version= "0.0.1"}
+resource-mesh-portal-tcp-common = { path = "../resource-mesh-portal-tcp-common", version= "0.0.1"}
+resource-mesh-portal-api-client = { path = "../resource-mesh-portal-api-client", version= "0.0.1"}
+anyhow = "1.0.44"
 tokio = { version = "1.4.0", features = ["full"] }
+async-trait = "0.1.48"
