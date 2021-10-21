@@ -2,21 +2,21 @@
 extern crate anyhow;
 
 use std::collections::HashMap;
+use std::prelude::rust_2021::TryInto;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Error;
-use futures::FutureExt;
 use futures::future::select_all;
+use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::error::SendTimeoutError;
 use uuid::Uuid;
 
-use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, Identifier, Key, Log, mesh, Signal, Status, Identifiers, IdentifierKind, ExtOperation};
+use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, ExtOperation, Identifier, IdentifierKind, Identifiers, Key, Log, mesh, Signal, Status};
 use resource_mesh_portal_serde::version::v0_0_1::config::Info;
-use std::sync::Arc;
-use resource_mesh_portal_serde::version::v0_0_1::mesh::outlet::Frame;
-use tokio::sync::mpsc::error::SendTimeoutError;
 use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
-use std::prelude::rust_2021::TryInto;
+use resource_mesh_portal_serde::version::v0_0_1::mesh::outlet::Frame;
 
 #[derive(Clone,Eq,PartialEq,Hash)]
 pub enum PortalStatus{
@@ -43,13 +43,6 @@ pub fn log( log: Log) {
     }
 }
 
-
-#[derive(Clone)]
-pub enum PortalKind {
-    Mechtron,
-    Portal
-}
-
 #[derive(Debug)]
 pub struct Exchange {
     pub id: ExchangeId,
@@ -61,15 +54,6 @@ enum PortalCall {
     FrameIn(mesh::inlet::Frame),
     FrameOut(mesh::outlet::Frame),
     Exchange(Exchange)
-}
-
-impl ToString for PortalKind {
-    fn to_string(&self) -> String {
-        match self {
-            PortalKind::Mechtron => "Mechtron".to_string(),
-            PortalKind::Portal => "Portal".to_string()
-        }
-    }
 }
 
 
@@ -150,10 +134,7 @@ impl Into<mesh::outlet::Response> for Response {
 }
 
 pub struct Portal {
-    pub key: Key,
-    pub address: Address,
     pub info: Info,
-    pub kind: PortalKind,
     outlet_tx: mpsc::Sender<mesh::outlet::Frame>,
     mux_tx: mpsc::Sender<MuxCall>,
     pub log: fn(log:Log),
@@ -172,7 +153,11 @@ impl Portal {
         self.status.clone()
     }
 
-    pub fn new(key: Key, address: Address, kind: PortalKind, info: Info, outlet_tx: mpsc::Sender<mesh::outlet::Frame>, inlet_rx: mpsc::Receiver<mesh::inlet::Frame>, logger: fn(log:Log) ) -> Self {
+    pub fn new( info: Info, outlet_tx: mpsc::Sender<mesh::outlet::Frame>, inlet_rx: mpsc::Receiver<mesh::inlet::Frame>, logger: fn(log:Log) ) -> Self {
+        let key = info.key.clone();
+        let address = info.address.clone();
+        let kind = info.kind.clone();
+
         let (mux_tx,mux_rx) = tokio::sync::mpsc::channel(128);
         let (status_tx,status_rx) = tokio::sync::broadcast::channel(1);
         let (call_tx,mut call_rx) = tokio::sync::mpsc::channel(128);
@@ -277,9 +262,6 @@ impl Portal {
         }
 
         Self{
-            key,
-            address,
-            kind,
             info,
             call_tx,
             outlet_tx,
@@ -318,7 +300,7 @@ impl Portal {
 
     pub async fn init(&mut self) -> Result<(), Error> {
         if self.status != PortalStatus::None {
-            let message = format!("{} has already received the init signal.",self.kind.to_string());
+            let message = format!("{} has already received the init signal.",self.info.kind.to_string());
             return Err(anyhow!(message));
         }
 
@@ -328,7 +310,7 @@ impl Portal {
         let mut status_rx = self.status_tx.subscribe();
         let (tx,rx) = tokio::sync::oneshot::channel();
         let config = self.info.config.clone();
-        let kind = self.kind.clone();
+        let kind = self.info.kind.clone();
         tokio::spawn( async move {
             loop {
                 let _status = if config.init_timeout > 0 {
@@ -425,20 +407,20 @@ impl <OPERATION> Message<OPERATION> {
 
 pub trait Router: Send+Sync {
     fn route( &self, message: Message<Operation>);
-    fn logger( &self, message: String ) {
+    fn logger( &self, message: &str ) {
         println!("{}", message );
     }
 }
 
 pub struct PortalMuxer {
     portals: HashMap<Identifier,Portal>,
-    router: Arc<dyn Router>,
+    router: Box<dyn Router>,
     address_to_key: HashMap<Address,Key>,
     key_to_address: HashMap<Key,Address>,
 }
 
 impl PortalMuxer {
-    pub fn new( router: Arc<dyn Router> ) -> mpsc::Sender<MuxCall> {
+    pub fn new( router: Box<dyn Router> ) -> mpsc::Sender<MuxCall> {
         let (portal_tx, mut portal_rx) = tokio::sync::mpsc::channel(128);
 
         let mut muxer = Self {
@@ -477,9 +459,12 @@ impl PortalMuxer {
                 Some(call) => {
                     match call {
                         MuxCall::Add(portal) => {
+                            let kind = portal.info.kind.clone();
+                            let address = portal.info.address.clone();
                             muxer.key_to_address.insert(portal.info.key.clone(), portal.info.address.clone() );
                             muxer.address_to_key.insert(portal.info.address.clone(), portal.info.key.clone() );
                             muxer.portals.insert(Identifier::Key(portal.info.key.clone()), portal );
+                            muxer.router.logger(format!("INFO: {} add to portal muxer at address {}", kind.to_string(), address ).as_str() );
                         }
                         MuxCall::Remove(id) => {
                             let key = match &id {
@@ -496,6 +481,7 @@ impl PortalMuxer {
                                     muxer.key_to_address.remove(&portal.info.key);
                                     muxer.address_to_key.remove(&portal.info.address);
 
+                                    muxer.router.logger(format!("INFO: {} removed from portal muxer at address {}", portal.info.kind.to_string(), portal.info.address ).as_str() );
                                     portal.shutdown();
                                 }
                             }

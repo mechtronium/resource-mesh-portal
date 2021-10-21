@@ -1,6 +1,10 @@
 use std::collections::HashMap;
+use std::convert::From;
+use std::convert::TryInto;
 use std::sync::Arc;
-use serde::{Serialize,Deserialize};
+
+use anyhow::Error;
+use serde::{Deserialize, Serialize};
 
 pub type ExchangeId =String;
 pub type BinSrc=String;
@@ -12,6 +16,31 @@ pub type CliId=String;
 pub type ArtifactRef=String;
 pub type Artifact=Arc<Vec<u8>>;
 pub type Port=String;
+
+
+pub struct PrimitiveFrame{
+    pub size: u32,
+    pub data: Vec<u8>
+}
+
+impl From<String> for PrimitiveFrame {
+    fn from(value: String) -> Self {
+        let bytes = value.as_bytes();
+        Self {
+            size: bytes.len() as u32,
+            data: bytes.to_vec()
+        }
+    }
+}
+
+impl TryInto<String> for PrimitiveFrame {
+    type Error = Error;
+
+    fn try_into(self) -> Result<String, Self::Error> {
+        Ok(String::from_utf8(self.data)?)
+    }
+}
+
 
 pub enum IdentifierKind {
     Key,
@@ -44,6 +73,17 @@ pub enum Log{
     Info(String),
     Error(String),
     Fatal(String)
+}
+
+impl ToString for Log {
+    fn to_string(&self) -> String {
+        match self {
+            Log::Warn(message) => {format!("WARN: {}",message)}
+            Log::Info(message) => {format!("INFO: {}",message)}
+            Log::Error(message) => {format!("ERROR: {}",message)}
+            Log::Fatal(message) => {format!("FATAL: {}",message)}
+        }
+    }
 }
 
 
@@ -152,8 +192,24 @@ pub mod config {
 
     use serde::{Deserialize, Serialize};
 
-    use crate::version::v0_0_1::{Address, ArtifactRef, Identifier, Key, Identifiers};
+    use crate::version::v0_0_1::{Address, ArtifactRef, Identifier, Identifiers, Key};
     use crate::version::v0_0_1::resource::Archetype;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub enum PortalKind {
+        Mechtron,
+        Portal
+    }
+
+    impl ToString for PortalKind {
+        fn to_string(&self) -> String {
+            match self {
+                PortalKind::Mechtron => "Mechtron".to_string(),
+                PortalKind::Portal => "Portal".to_string()
+            }
+        }
+    }
+
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Info {
@@ -162,7 +218,8 @@ pub mod config {
         pub parent: Identifier,
         pub archetype: Archetype,
         pub config: Config,
-        pub ext_config: Option<ArtifactRef>
+        pub ext_config: Option<ArtifactRef>,
+        pub kind: PortalKind
     }
 
     impl Info {
@@ -184,6 +241,32 @@ pub mod config {
         pub bind: BindConfig
     }
 
+    impl Config {
+        pub fn with_bind_config( bind: BindConfig ) -> Self {
+            Self {
+                max_bin_size: 128*1024,
+                bin_parcel_size: 16*1024,
+                init_timeout: 30,
+                frame_timeout: 5,
+                response_timeout: 15,
+                bind
+            }
+        }
+    }
+
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                max_bin_size: 128*1024,
+                bin_parcel_size: 16*1024,
+                init_timeout: 30,
+                frame_timeout: 5,
+                response_timeout: 15,
+                bind: Default::default()
+            }
+        }
+    }
+
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct SchemaRef {
        pub schema: String,
@@ -193,6 +276,14 @@ pub mod config {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct BindConfig {
         pub ports: HashMap<String, PortConfig>,
+    }
+
+    impl Default for BindConfig {
+        fn default() -> Self {
+            Self {
+                ports: Default::default()
+            }
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,9 +351,13 @@ pub mod http{
 
 pub mod mesh {
     pub mod inlet {
+        use std::convert::TryFrom;
+        use std::convert::TryInto;
+
+        use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, Signal, Status};
+        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, Signal, Status};
         use crate::version::v0_0_1::mesh::inlet::resource::Operation;
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -299,10 +394,31 @@ pub mod mesh {
             BinParcel(BinParcel)
         }
 
+        impl TryInto<PrimitiveFrame> for Frame {
+            type Error = Error;
+
+            fn try_into(self) -> Result<PrimitiveFrame, Self::Error> {
+                let data = bincode::serialize(&self)?;
+                Ok( PrimitiveFrame {
+                    size: data.len() as u32,
+                    data
+                })
+            }
+        }
+
+        impl TryFrom<PrimitiveFrame> for Frame {
+            type Error = Error;
+
+            fn try_from(value: PrimitiveFrame) -> Result<Self, Self::Error> {
+                let frame = bincode::deserialize(value.data.as_slice() )?;
+                Ok(frame)
+            }
+        }
+
         pub mod resource {
             use serde::{Deserialize, Serialize};
 
-            use crate::version::v0_0_1::{Identifier, State, ExtOperation};
+            use crate::version::v0_0_1::{ExtOperation, Identifier, State};
             use crate::version::v0_0_1::resource::Archetype;
 
             #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,9 +482,13 @@ pub mod mesh {
     }
 
     pub mod outlet {
+        use std::convert::TryFrom;
+        use std::convert::TryInto;
+
+        use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, Identifier, Port, Signal, ExtOperation};
+        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, Signal};
         use crate::version::v0_0_1::config::Info;
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -408,6 +528,27 @@ pub mod mesh {
             Shutdown
         }
 
+        impl TryInto<PrimitiveFrame> for Frame {
+            type Error = Error;
+
+            fn try_into(self) -> Result<PrimitiveFrame, Self::Error> {
+                let data = bincode::serialize(&self)?;
+                Ok( PrimitiveFrame {
+                    size: data.len() as u32,
+                    data
+                })
+            }
+        }
+
+        impl TryFrom<PrimitiveFrame> for Frame {
+            type Error = Error;
+
+            fn try_from(value: PrimitiveFrame) -> Result<Self, Self::Error> {
+                let frame = bincode::deserialize(value.data.as_slice() )?;
+                Ok(frame)
+            }
+        }
+
         pub mod resource {
             use serde::{Deserialize, Serialize};
 
@@ -424,3 +565,7 @@ pub mod mesh {
         }
     }
 }
+
+
+
+

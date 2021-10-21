@@ -1,11 +1,13 @@
 [package]
 name = "resource-mesh-portal-tcp-server"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+resource-mesh-portal-serde = { path = "../resource-mesh-portal-serde", version= "0.0.1"}
 resource-mesh-portal-api-server = { path = "../resource-mesh-portal-api-server", version= "0.0.1"}
 anyhow = "1.0.44"
 tokio = { version = "1.4.0", features = ["full"] }
+async-trait = "0.1.48"
