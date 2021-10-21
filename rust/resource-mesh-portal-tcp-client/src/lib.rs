@@ -15,6 +15,8 @@ use tokio::sync::mpsc;
 use resource_mesh_portal_serde::version::v0_0_1::mesh;
 use tokio::sync::mpsc::error::TrySendError;
 use resource_mesh_portal_serde::version;
+use std::thread;
+use tokio::time::Duration;
 
 pub struct PortalTcpClient {
     pub host: String,
@@ -25,13 +27,23 @@ impl PortalTcpClient {
 
     pub async fn new( host: String, client: Box<dyn PortalClient> ) -> Result<Self,Error> {
         let stream = TcpStream::connect(host.clone()).await?;
+println!("CLIENT: connection made: {}", host );
 
         let (reader,writer) = stream.into_split();
         let mut reader = PrimitiveFrameReader::new(reader);
         let mut writer = PrimitiveFrameWriter::new(writer);
 
+println!("CLIENT: writing flavor: {}", client.flavor() );
+
         writer.write_string(client.flavor()).await?;
+
+         tokio::time::sleep(Duration::from_secs(0)).await;
+
+        println!("CLIENT: waiting for read flavor result..." );
         let result = reader.read_string().await?;
+println!("CLIENT: flavor result : {}", client.flavor() );
+
+        tokio::time::sleep(Duration::from_secs(0)).await;
 
         if result != "Ok" {
             let message = format!("FLAVOR MATCH FAILED: {}",result);
@@ -39,7 +51,15 @@ impl PortalTcpClient {
             return Err(anyhow!(message));
         }
 
+        if true {
+            return Err(anyhow!("ERROR"));
+        }
+
         client.auth(&mut reader, &mut writer).await?;
+
+
+        tokio::time::sleep(Duration::from_secs(0)).await;
+
 
         let result = reader.read_string().await?;
 
@@ -111,7 +131,7 @@ impl PortalTcpClient {
 }
 
 #[async_trait]
-trait PortalClient {
+pub trait PortalClient: Send+Sync {
     fn flavor(&self) -> String;
     async fn auth( &self, reader: & mut PrimitiveFrameReader, writer: & mut PrimitiveFrameWriter ) -> Result<(),Error>;
     fn portal_ctrl_factory(&self)->fn( skel: Arc<PortalSkel>, inlet_api: InletApi) -> Box<dyn PortalCtrl>;

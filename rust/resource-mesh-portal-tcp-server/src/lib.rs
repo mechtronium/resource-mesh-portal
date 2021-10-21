@@ -57,12 +57,15 @@ impl PortalTcpServer {
 
         {
             tokio::spawn(async move {
+println!("SERVER: BINDING to 127.0.0.1... ");
                 match std::net::TcpListener::bind(format!("127.0.0.1:{}", self.port)) {
                     Ok(std_listener) => {
                         let listener = TcpListener::from_std(std_listener).unwrap();
+println!("SERVER: waiting for connection ...  ");
                         while let Ok((stream, _)) = listener.accept().await {
+println!("SERVER: accepted connection");
 
-                            Self::handle(&muxer, self.server.clone(), stream);
+                            Self::handle(&muxer, self.server.clone(), stream ).await;
 
 
                             tokio::time::sleep(Duration::from_secs(0)).await;
@@ -81,28 +84,59 @@ impl PortalTcpServer {
         let (reader, writer) = stream.into_split();
         let mut reader = PrimitiveFrameReader::new(reader);
         let mut writer = PrimitiveFrameWriter::new(writer);
+println!("SERVER: READING flavor...");
+
         let flavor = reader.read_string().await?;
+println!("SERVER: flavor is '{}'", flavor );
+
+/*if true {
+    return Ok(());
+}
+
+ */
 
         // first verify flavor matches
         if flavor != server.flavor() {
             let message = format!("ERROR: flavor does not match.  expected '{}'", server.flavor() );
+
+println!("SERVER: MESSAGE: {}", message );
+println!("SERVER: message frame.size: {}", PrimitiveFrame::from( message.clone() ).size()  );
+println!("SERVER: bad flavor, writing message: {}",message  );
+writer.enabled = true;
+/*if true {
+    return Ok(())
+}*/
             writer.write_string(message.clone() ).await?;
+            tokio::time::sleep(Duration::from_secs(0)).await;
+
+
+
             return Err(anyhow!(message));
+
+        } else {
+            println!("accepted flavor");
         }
 
+
         writer.write_string( "Ok".to_string() ).await?;
+        tokio::time::sleep(Duration::from_secs(0)).await;
 
         match server.auth(&mut reader, &mut writer).await
         {
             Ok(user) => {
+                tokio::time::sleep(Duration::from_secs(0)).await;
                 writer.write_string( "Ok".to_string() ).await?;
 
                 let mut reader : FrameReader<mesh::inlet::Frame> = FrameReader::new(reader );
                 let mut writer : FrameWriter<mesh::outlet::Frame>  = FrameWriter::new(writer );
 
+if true {
+return Ok(());
+}
 
                 match server.info(user.clone() ).await {
                     Ok(info) => {
+                        tokio::time::sleep(Duration::from_secs(0)).await;
 
                         let (outlet_tx,mut outlet_rx) = mpsc::channel(128);
                         let (inlet_tx,inlet_rx) = mpsc::channel(128);

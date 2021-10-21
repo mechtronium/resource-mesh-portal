@@ -19,18 +19,24 @@ pub type Port=String;
 
 
 pub struct PrimitiveFrame{
-    pub size: u32,
     pub data: Vec<u8>
+}
+
+impl PrimitiveFrame {
+    pub fn size(&self) -> u32 {
+        self.data.len() as u32
+    }
 }
 
 impl From<String> for PrimitiveFrame {
     fn from(value: String) -> Self {
         let bytes = value.as_bytes();
         Self {
-            size: bytes.len() as u32,
             data: bytes.to_vec()
         }
     }
+
+
 }
 
 impl TryInto<String> for PrimitiveFrame {
@@ -400,7 +406,6 @@ pub mod mesh {
             fn try_into(self) -> Result<PrimitiveFrame, Self::Error> {
                 let data = bincode::serialize(&self)?;
                 Ok( PrimitiveFrame {
-                    size: data.len() as u32,
                     data
                 })
             }
@@ -534,7 +539,6 @@ pub mod mesh {
             fn try_into(self) -> Result<PrimitiveFrame, Self::Error> {
                 let data = bincode::serialize(&self)?;
                 Ok( PrimitiveFrame {
-                    size: data.len() as u32,
                     data
                 })
             }

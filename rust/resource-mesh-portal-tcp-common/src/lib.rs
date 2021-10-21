@@ -5,11 +5,12 @@ extern crate anyhow;
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncWrite};
 
 use resource_mesh_portal_serde::version::v0_0_1::{mesh, PrimitiveFrame};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use std::marker::PhantomData;
+use std::time::Duration;
 
 #[cfg(test)]
 mod tests {
@@ -93,11 +94,14 @@ impl PrimitiveFrameReader {
 
     pub async fn read(&mut self) -> Result<PrimitiveFrame,Error> {
         let size = self.read.read_u32().await? as usize;
-        let mut vec: Vec<u8> = Vec::with_capacity(size );
+println!("..read_u32 {}", size );
+
+        let mut vec= vec![0 as u8; size];
         let buf = vec.as_mut_slice();
-        self.read.read(buf).await?;
+println!("..buf.size() {}", buf.len()  );
+//return Ok(PrimitiveFrame { data: "blah".as_bytes().to_vec() });
+        self.read.read_exact(buf).await?;
         Result::Ok(PrimitiveFrame {
-            size: size as u32,
             data: vec
         })
     }
@@ -111,27 +115,43 @@ impl PrimitiveFrameReader {
 }
 
 pub struct PrimitiveFrameWriter {
-    write: OwnedWriteHalf
+    write: OwnedWriteHalf,
+    pub enabled: bool,
+    pub writes: usize
 }
 
 impl PrimitiveFrameWriter {
 
     pub fn new(write: OwnedWriteHalf) -> Self {
         Self {
-            write
+            write,
+            enabled: true,
+            writes: 0
         }
     }
 
 
     pub async fn write( &mut self, frame: PrimitiveFrame ) -> Result<(),Error> {
-        self.write.write_u32(frame.size ).await?;
+
+self.writes = self.writes +1;
+
+println!("..write_u32 {}", frame.size());
+println!("..WRITES: {}", self.writes );
+        if !self.enabled {
+            return Ok(());
+        }
+        self.write.write_u32(frame.size() ).await?;
+
+println!("..write '{}'", String::from_utf8(frame.data.clone() )? );
         self.write.write_all(frame.data.as_slice() ).await?;
         Ok(())
     }
 
 
     pub async fn write_string(&mut self, string: String) -> Result<(),Error> {
-        let frame = string.into();
+        let frame = PrimitiveFrame::from(string);
+println!("..frame.size {}", frame.size());
+
         self.write(frame).await
     }
 }
