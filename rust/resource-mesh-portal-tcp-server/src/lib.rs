@@ -24,6 +24,8 @@ use resource_mesh_portal_serde::version::v0_0_1::{mesh, PrimitiveFrame, Log, Sta
 use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
 use resource_mesh_portal_tcp_common::{FrameReader, FrameWriter, PrimitiveFrameReader, PrimitiveFrameWriter};
 use resource_mesh_portal_serde::version::v0_0_1::config::Info;
+use tokio::runtime::Runtime;
+use std::thread;
 
 #[derive(Clone,strum_macros::Display)]
 pub enum Event {
@@ -41,7 +43,7 @@ pub enum EventResult<E>{
     Err(String)
 }
 
-pub enum PortalServerCall {
+pub enum Call {
     ListenEvents(oneshot::Sender<broadcast::Receiver<Event>>),
     InjectMessage(Message<Operation>),
     Shutdown
@@ -60,102 +62,107 @@ impl Alive {
 }
 
 pub struct PortalTcpServer {
-    pub port: usize,
-    pub server: Arc<dyn PortalServer>,
-    pub broadcaster_tx: broadcast::Sender<Event>
+    port: usize,
+    server: Arc<dyn PortalServer>,
+    broadcaster_tx: broadcast::Sender<Event>,
+    call_tx: mpsc::Sender<Call>,
+    mux_tx: mpsc::Sender<MuxCall>,
+    alive: Arc<Mutex<Alive>>
 }
 
 impl PortalTcpServer {
 
-    pub fn new(port: usize, server: Box<dyn PortalServer>) -> Self {
+    pub fn new(port: usize, server: Box<dyn PortalServer>) -> mpsc::Sender<Call> {
+        let server:Arc<dyn PortalServer> = server.into();
         let (broadcaster_tx,_) = broadcast::channel(32);
-        Self {
+        let (call_tx,mut call_rx) = mpsc::channel(1024 );
+        let router = Box::new(RouterProxy::new(server.clone()) );
+        let mux_tx= PortalMuxer::new(router);
+
+        let server = Self {
             port,
-            server: server.into(),
-            broadcaster_tx
-        }
-    }
+            server,
+            broadcaster_tx,
+            call_tx: call_tx.clone(),
+            mux_tx,
+            alive: Arc::new(Mutex::new(Alive::new()))
+        };
 
 
-    pub fn start(self) -> mpsc::Sender<PortalServerCall> {
-        self.broadcaster_tx.send( Event::Status(Status::Initializing) ).unwrap_or_default();
+        thread::spawn( || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async {
 
-        let alive = Arc::new( Mutex::new( Alive::new() ));
-        let (server_tx,mut server_rx) = mpsc::channel(128);
-        let router = Box::new(RouterProxy::new(self.server.clone()));
-        let port = self.port.clone();
-        let muxer = PortalMuxer::new(router);
-println!("SERVER: start");
-        {
-            let alive = alive.clone();
-            let broadcaster_tx = self.broadcaster_tx.clone();
-            let muxer = muxer.clone();
-println!("SERVER: pre-spawn");
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(0)).await;
-println!("SERVER: call loop");
-                while let Option::Some(call) = server_rx.recv().await {
-                    match call {
-                        PortalServerCall::InjectMessage(_) => {}
-                        PortalServerCall::ListenEvents(tx) => {
-println!("SERVER: RECEIVED request for broadcast_Tx");
-                            tx.send( broadcaster_tx.subscribe() );
-                        },
-                        PortalServerCall::Shutdown  => {
-                            broadcaster_tx.send(Event::Shutdown).unwrap_or_default();
-                            alive.lock().await.alive = false;
-                            match std::net::TcpStream::connect(format!("localhost:{}", port)) {
-                                Ok(_) => {}
-                                Err(_) => {}
-                            }
-                            return;
-                        }
-                    }
-                }
-            });
-        }
-
-
-        {
-            let alive = alive.clone();
-            tokio::spawn(async move {
-
-                let addr = format!("localhost:{}", self.port);
-                match std::net::TcpListener::bind(addr.clone()) {
-
-
-                    Ok(std_listener) => {
+                server.broadcaster_tx.send( Event::Status(Status::Initializing) ).unwrap_or_default();
+                {
+                    let port = server.port.clone();
+                    let broadcaster_tx = server.broadcaster_tx.clone();
+                    let alive = server.alive.clone();
+                    tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(0)).await;
-                        let listener = TcpListener::from_std(std_listener).unwrap();
-                        self.broadcaster_tx.send( Event::Status(Status::Ready) ).unwrap_or_default();
-                        tokio::time::sleep(Duration::from_secs(0)).await;
-println!("STARTED LISTENING addr {}", addr);
-                        while let Ok((stream, _)) = listener.accept().await {
-                            {
-println!("CONNECTION:w");
-                                if !alive.lock().await.alive.clone() {
-                                    self.broadcaster_tx.send( Event::Status(Status::Done) ).unwrap_or_default();
-                                    (self.server.logger())("server reached final shutdown");
+                        while let Option::Some(call) = call_rx.recv().await {
+                            match call {
+                                Call::InjectMessage(_) => {}
+                                Call::ListenEvents(tx) => {
+                                    tx.send( broadcaster_tx.subscribe() );
+                                },
+                                Call::Shutdown  => {
+                                    broadcaster_tx.send(Event::Shutdown).unwrap_or_default();
+                                    alive.lock().await.alive = false;
+                                    match std::net::TcpStream::connect(format!("localhost:{}", port)) {
+                                        Ok(_) => {}
+                                        Err(_) => {}
+                                    }
                                     return;
                                 }
                             }
-                            self.broadcaster_tx.send( Event::ClientConnected ).unwrap_or_default();
-                            (&self).handle(&muxer, stream ).await;
                         }
-println!("~~ completed listenering  ~~~");
-                    }
-                    Err(error) => {
-                        let message = format!("FATAL: could not setup TcpListener {}", error);
-                        (self.server.logger())(message.as_str());
-                        self.broadcaster_tx.send( Event::Status(Status::Panic(message)) ).unwrap_or_default();
-                    }
+                    });
                 }
+
+                server.start().await;
             });
-        }
-        server_tx
+        });
+
+        call_tx
     }
 
-    async fn handle( &self, muxer: &mpsc::Sender<MuxCall>, stream: TcpStream ) -> Result<(),Error> {
+
+    async fn start(self) {
+            let addr = format!("localhost:{}", self.port);
+            match std::net::TcpListener::bind(addr.clone()) {
+
+
+                Ok(std_listener) => {
+                    tokio::time::sleep(Duration::from_secs(0)).await;
+                    let listener = TcpListener::from_std(std_listener).unwrap();
+                    self.broadcaster_tx.send( Event::Status(Status::Ready) ).unwrap_or_default();
+                    tokio::time::sleep(Duration::from_secs(0)).await;
+println!("STARTED LISTENING addr {}", addr);
+                    while let Ok((stream, _)) = listener.accept().await {
+                        {
+println!("CONNECTION:w");
+                            if !self.alive.lock().await.alive.clone() {
+                                self.broadcaster_tx.send( Event::Status(Status::Done) ).unwrap_or_default();
+                                (self.server.logger())("server reached final shutdown");
+                                return;
+                            }
+                        }
+                        self.broadcaster_tx.send( Event::ClientConnected ).unwrap_or_default();
+                        (&self).handle(stream).await;
+                    }
+println!("~~ completed listenering  ~~~");
+                }
+                Err(error) => {
+                    let message = format!("FATAL: could not setup TcpListener {}", error);
+                    (self.server.logger())(message.as_str());
+                    self.broadcaster_tx.send( Event::Status(Status::Panic(message)) ).unwrap_or_default();
+                }
+            }
+
+    }
+
+    async fn handle( &self, stream: TcpStream ) -> Result<(),Error> {
         let (reader, writer) = stream.into_split();
         let mut reader = PrimitiveFrameReader::new(reader);
         let mut writer = PrimitiveFrameWriter::new(writer);
@@ -232,7 +239,7 @@ println!("~~ completed listenering  ~~~");
                             });
                         }
 
-                        match muxer.send_timeout(MuxCall::Add(portal),Duration::from_secs(info.config.frame_timeout.clone()), ).await {
+                        match self.mux_tx.send_timeout(MuxCall::Add(portal),Duration::from_secs(info.config.frame_timeout.clone()), ).await {
                             Err(err) => {
                                 let message = err.to_string();
                                 (self.server.logger())(message.as_str());

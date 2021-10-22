@@ -16,7 +16,7 @@ mod tests {
     use resource_mesh_portal_serde::version::v0_0_1::config::{Config, Info, PortalKind};
     use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
     use resource_mesh_portal_serde::version::v0_0_1::resource::Archetype;
-    use resource_mesh_portal_tcp_server::{PortalServer, PortalTcpServer, Event, PortalServerCall};
+    use resource_mesh_portal_tcp_server::{PortalServer, PortalTcpServer, Event, Call};
     use resource_mesh_portal_tcp_common::{PrimitiveFrameReader, PrimitiveFrameWriter, FrameReader, FrameWriter};
     use resource_mesh_portal_tcp_client::{PortalTcpClient, PortalClient};
     use anyhow::Error;
@@ -34,33 +34,19 @@ mod tests {
 //        let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
 
-        let (server_tx,server_rx) = tokio::sync::oneshot::channel();
+        let (listen_tx, listen_rx) : (tokio::sync::oneshot::Sender<tokio::sync::broadcast::Receiver<Event>>,tokio::sync::oneshot::Receiver<tokio::sync::broadcast::Receiver<Event>>) = tokio::sync::oneshot::channel();
         println!("got to HERE...");
         tokio::spawn( async move
             {
-                let mut server_caller :tokio::sync::mpsc::Sender<PortalServerCall>= server_rx.await.unwrap();
-                let (tx,rx) = tokio::sync::oneshot::channel();
-                server_caller.send(PortalServerCall::ListenEvents(tx)).await;
-                match rx.await {
-                    Ok(mut server_events) => {
-                        println!("waiting for events...");
-                        while let Result::Ok(event) = server_events.recv().await {
-                            println!("event: {}",event.to_string());
-                        }
-                    }
-                    Err(_) => {
-                        println!("broadcast shutdown");
-                    }
+                let mut broadcast_rx = listen_rx.await.unwrap();
+                while let Result::Ok(event) = broadcast_rx.recv().await {
+                    println!("event: {}",event.to_string());
                 }
             });
 
-        thread::spawn( || {
-            let rt = Runtime::new().unwrap();
-            rt.block_on(async {
-                launch_server(server_tx).await;
-                println!("SERVER: block_on done.");
-            } );
-        });
+        let port = 32355;
+        let server = PortalTcpServer::new( port , Box::new( TestPortalServer::new() ));
+        server.send( Call::ListenEvents(listen_tx)).await;
 
 
         thread::spawn( || {
@@ -89,14 +75,6 @@ mod tests {
         Ok(())
     }
 
-    pub async fn launch_server(server_tx: tokio::sync::oneshot::Sender<mpsc::Sender<PortalServerCall>>) {
-            let port = 32355;
-            let server = PortalTcpServer::new( port , Box::new( TestPortalServer::new() ));
-            let server_caller = server.start();
-            server_tx.send(server_caller).unwrap_or_default();
-            println!("launch_server complete...");
-        tokio::time::sleep(Duration::from_secs(3)).await;
-    }
 
     pub async fn launch_client() -> Result<(),Error> {
         let port = 32355;
