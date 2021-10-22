@@ -32,44 +32,39 @@ mod tests {
     #[tokio::test]
     async fn server_up() -> Result<(),Error> {
 //        let rt = Builder::new_current_thread().enable_all().build().unwrap();
-
-
-        let (listen_tx, listen_rx) : (tokio::sync::oneshot::Sender<tokio::sync::broadcast::Receiver<Event>>,tokio::sync::oneshot::Receiver<tokio::sync::broadcast::Receiver<Event>>) = tokio::sync::oneshot::channel();
-        println!("got to HERE...");
-        tokio::spawn( async move
-            {
-                let mut broadcast_rx = listen_rx.await.unwrap();
-                while let Result::Ok(event) = broadcast_rx.recv().await {
-                    println!("event: {}",event.to_string());
-                }
-            });
-
         let port = 32355;
         let server = PortalTcpServer::new( port , Box::new( TestPortalServer::new() ));
-        server.send( Call::ListenEvents(listen_tx)).await;
+        let (shutdown_tx,shutdown_rx) = tokio::sync::oneshot::channel();
 
-
-        thread::spawn( || {
-            let rt = Runtime::new().unwrap();
-            rt.block_on(async {
-                match launch_client().await {
-                    Ok(_) => {
-                        println!("CLIENT: terminated normally" );
+        {
+            let server = server.clone();
+            tokio::spawn(async move
+                {
+                    let (listen_tx,listen_rx) = tokio::sync::oneshot::channel();
+                    server.send(Call::ListenEvents(listen_tx)).await;
+                    let mut broadcast_rx = listen_rx.await.unwrap();
+                    while let Result::Ok(event) = broadcast_rx.recv().await {
+                        println!("event: {}", event.to_string());
+                        match event {
+                            Event::Info(_) => {
+                                server.send(Call::Shutdown).await;
+                            }
+                            Event::Shutdown  => {
+                                shutdown_tx.send(());
+                                return;
+                            }
+                            _ => {}
+                        }
                     }
-                    Err(error) => {
-                        println!("CLIENT ERROR: {}", error.to_string())
-                    }
-                }
-            } );
-        });
-
-        tokio::time::sleep(Duration::from_secs(3)).await;
+                });
+        }
 
 
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        let client = Box::new(TestPortalClient::new("scott".to_string()) );
 
-        thread::sleep( Duration::from_secs(3));
+        PortalTcpClient::new(format!("localhost:{}",port), client ).await?;
 
+        shutdown_rx.await;
 
         println!("got to the end...");
         Ok(())
