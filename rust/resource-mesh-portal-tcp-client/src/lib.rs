@@ -26,25 +26,17 @@ pub struct PortalTcpClient {
 impl PortalTcpClient {
 
     pub async fn new( host: String, client: Box<dyn PortalClient> ) -> Result<Self,Error> {
-println!("CLIENT attempt to connect: {}", host );
 
-        tokio::time::sleep(Duration::from_secs(0)).await;
         let stream = TcpStream::connect(host.clone()).await?;
-println!("CLIENT connected.");
-        tokio::time::sleep(Duration::from_secs(0)).await;
 
         let (reader,writer) = stream.into_split();
         let mut reader = PrimitiveFrameReader::new(reader);
         let mut writer = PrimitiveFrameWriter::new(writer);
 
-
         writer.write_string(client.flavor()).await?;
-
-         tokio::time::sleep(Duration::from_secs(0)).await;
 
         let result = reader.read_string().await?;
 
-        tokio::time::sleep(Duration::from_secs(0)).await;
 
         if result != "Ok" {
             let message = format!("FLAVOR MATCH FAILED: {}",result);
@@ -53,9 +45,6 @@ println!("CLIENT connected.");
         }
 
         client.auth(&mut reader, &mut writer).await?;
-
-        tokio::time::sleep(Duration::from_secs(0)).await;
-
 
         let result = reader.read_string().await?;
 

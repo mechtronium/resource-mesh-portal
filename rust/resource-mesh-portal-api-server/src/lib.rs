@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::sync::mpsc::error::{SendTimeoutError, SendError};
 use uuid::Uuid;
 
-use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, ExtOperation, Identifier, IdentifierKind, Identifiers, Key, Log, mesh, Signal, Status, CloseReason};
+use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, ExtOperation, Identifier, IdentifierKind, Identifiers, Key, Log, mesh, ResponseSignal, Status, CloseReason};
 use resource_mesh_portal_serde::version::v0_0_1::config::Info;
 use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::Operation;
 use resource_mesh_portal_serde::version::v0_0_1::mesh::outlet::Frame;
@@ -58,11 +58,43 @@ enum PortalCall {
 }
 
 
+#[derive(Clone)]
 pub struct Request<OPERATION> {
     pub to: Identifier,
     pub from: Identifier,
     pub operation: OPERATION,
     pub kind: ExchangeKind,
+}
+
+impl <OPERATION> Request<OPERATION> {
+    pub fn new( to: Identifier, from: Identifier, operation: OPERATION ) -> Self {
+        Request {
+            to,
+            from,
+            operation,
+            kind: ExchangeKind::None
+        }
+    }
+}
+
+impl TryInto<Request<ExtOperation>> for Request<Operation> {
+    type Error = Error;
+
+    fn try_into(self) -> Result<Request<ExtOperation>, Self::Error> {
+        match self.operation {
+            Operation::Resource(_) => {
+                Err(anyhow!("cannot turn a ResourceOperation into an ExtOperation"))
+            }
+            Operation::Ext(ext) => {
+                Ok(Request{
+                    to: self.to,
+                    from: self.from,
+                    operation: ext,
+                    kind: self.kind
+                })
+            }
+        }
+    }
 }
 
 impl Request<Operation> {
@@ -96,11 +128,12 @@ impl Into<mesh::outlet::Request> for Request<ExtOperation> {
     }
 }
 
+#[derive(Clone)]
 pub struct Response {
    pub to: Identifier,
    pub from: Identifier,
    pub exchange_id: ExchangeId,
-   pub signal: Signal
+   pub signal: ResponseSignal
 }
 
 impl Response {
@@ -216,7 +249,7 @@ impl Portal {
                                                 let response = mesh::outlet::Response{
                                                     from: Identifier::Key(info.key.clone()),
                                                     exchange_id: exchange_id.clone(),
-                                                    signal: Signal::Error("a RequestResponse message must have one and only one to recipient.".to_string())
+                                                    signal: ResponseSignal::Error("a RequestResponse message must have one and only one to recipient.".to_string())
                                                 };
                                                 let result = outlet_tx.send_timeout(mesh::outlet::Frame::Response(response), Duration::from_secs(info.config.frame_timeout.clone()) ).await;
                                                 if let Result::Err(_err) = result {
@@ -390,6 +423,7 @@ impl Portal {
 pub enum MuxCall {
     Add(Portal),
     Remove(Identifier),
+    Select{ selector: fn(info:&Info)->bool, tx: oneshot::Sender<Vec<Info>> },
     MessageIn(Message<Operation>),
     MessageOut(Message<ExtOperation>)
 }
@@ -425,17 +459,20 @@ pub struct PortalMuxer {
     router: Box<dyn Router>,
     address_to_key: HashMap<Address,Key>,
     key_to_address: HashMap<Key,Address>,
+    mux_tx: mpsc::Sender<MuxCall>,
+    mux_rx: mpsc::Receiver<MuxCall>,
 }
 
 impl PortalMuxer {
-    pub fn new( router: Box<dyn Router> ) -> mpsc::Sender<MuxCall> {
-        let (portal_tx, mut portal_rx) = tokio::sync::mpsc::channel(128);
+    pub fn new( mux_tx: mpsc::Sender<MuxCall>, mux_rx: mpsc::Receiver<MuxCall>, router: Box<dyn Router> ) {
 
         let mut muxer = Self {
             portals: HashMap::new(),
             address_to_key: HashMap::new(),
             key_to_address: HashMap::new(),
             router,
+            mux_tx,
+            mux_rx
         };
 
         tokio::spawn( async move {
@@ -448,7 +485,7 @@ impl PortalMuxer {
                 ids.push(key.clone());
             }
 
-            futures.push( portal_rx.recv().boxed() );
+            futures.push( muxer.mux_rx.recv().boxed() );
 
             let (call, future_index, _) = select_all(futures).await;
 
@@ -513,13 +550,20 @@ impl PortalMuxer {
                                 None => {}
                             }
                         }
+                        MuxCall::Select { selector, tx } => {
+                            let mut rtn = vec![];
+                            for portal in muxer.portals.values() {
+                                if selector(&portal.info) {
+                                    rtn.push(portal.info.clone());
+                                }
+                            }
+                            tx.send(rtn).unwrap_or_default();
+                        }
                     }
                 }
             }
 
         } );
-
-        portal_tx
     }
 
     fn get_portal( &self, id: &Identifier ) -> Option<&Portal> {

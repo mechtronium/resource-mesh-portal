@@ -76,15 +76,18 @@ impl PortalTcpServer {
         let server:Arc<dyn PortalServer> = server.into();
         let (broadcaster_tx,_) = broadcast::channel(32);
         let (call_tx,mut call_rx) = mpsc::channel(1024 );
-        let router = Box::new(RouterProxy::new(server.clone()) );
-        let mux_tx= PortalMuxer::new(router);
+
+        let (mux_tx, mux_rx) = mpsc::channel(1024 );
+        let router = server.router_factory(mux_tx.clone());
+
+        PortalMuxer::new(mux_tx.clone(),mux_rx,router);
 
         let server = Self {
             port,
             server,
             broadcaster_tx,
             call_tx: call_tx.clone(),
-            mux_tx,
+            mux_tx: mux_tx.clone(),
             alive: Arc::new(Mutex::new(Alive::new()))
         };
 
@@ -131,27 +134,22 @@ impl PortalTcpServer {
     async fn start(self) {
             let addr = format!("localhost:{}", self.port);
             match std::net::TcpListener::bind(addr.clone()) {
-
-
                 Ok(std_listener) => {
                     tokio::time::sleep(Duration::from_secs(0)).await;
                     let listener = TcpListener::from_std(std_listener).unwrap();
                     self.broadcaster_tx.send( Event::Status(Status::Ready) ).unwrap_or_default();
                     tokio::time::sleep(Duration::from_secs(0)).await;
-println!("STARTED LISTENING addr {}", addr);
                     while let Ok((stream, _)) = listener.accept().await {
                         {
-println!("CONNECTION:w");
                             if !self.alive.lock().await.alive.clone() {
-                                self.broadcaster_tx.send( Event::Status(Status::Done) ).unwrap_or_default();
                                 (self.server.logger())("server reached final shutdown");
-                                return;
+                                break;
                             }
                         }
                         self.broadcaster_tx.send( Event::ClientConnected ).unwrap_or_default();
                         (&self).handle(stream).await;
                     }
-println!("~~ completed listenering  ~~~");
+                    self.broadcaster_tx.send( Event::Status(Status::Done) ).unwrap_or_default();
                 }
                 Err(error) => {
                     let message = format!("FATAL: could not setup TcpListener {}", error);
@@ -271,29 +269,12 @@ pub struct RouterProxy {
     pub server: Arc<dyn PortalServer>
 }
 
-impl RouterProxy {
-    pub fn new( server: Arc<dyn PortalServer> ) -> Self {
-        Self {
-            server
-        }
-    }
-}
-
-impl Router for RouterProxy {
-    fn route(&self, message: Message<Operation>) {
-        self.server.route_to_mesh(message);
-    }
-
-    fn logger( &self, message: &str ) {
-        (self.server.logger())(message);
-    }
-}
 
 #[async_trait]
 pub trait PortalServer: Sync+Send {
     fn flavor(&self) -> String;
     async fn auth(&self, reader: &mut PrimitiveFrameReader, writer: &mut PrimitiveFrameWriter) -> Result<String,Error>;
-    fn route_to_mesh(&self, message: Message<Operation>);
+    fn router_factory(&self, mux_tx: tokio::sync::mpsc::Sender<MuxCall> ) -> Box<dyn Router>;
     fn logger(&self) -> fn(message: &str);
     async fn info(&self, user: String ) -> Result<Info,Error>;
 }

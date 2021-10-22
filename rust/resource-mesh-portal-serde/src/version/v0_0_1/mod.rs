@@ -164,7 +164,7 @@ pub enum Entity {
 }
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
-pub enum Signal {
+pub enum ResponseSignal {
     Ok(Entity),
     Error(String)
 }
@@ -227,6 +227,7 @@ pub mod config {
     pub struct Info {
         pub key: Key,
         pub address: Address,
+        pub owner: String,
         pub parent: Identifier,
         pub archetype: Archetype,
         pub config: Config,
@@ -369,7 +370,7 @@ pub mod mesh {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, Signal, Status, CloseReason};
+        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseSignal, Status, CloseReason};
         use crate::version::v0_0_1::mesh::inlet::resource::Operation;
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -393,7 +394,7 @@ pub mod mesh {
         pub struct Response {
             pub to: Identifier,
             pub exchange_id: ExchangeId,
-            pub signal: Signal,
+            pub signal: ResponseSignal,
         }
 
         #[derive(Debug,Clone,Serialize,Deserialize,strum_macros::Display)]
@@ -483,6 +484,14 @@ pub mod mesh {
                 meta: MetaSelector
             }
 
+            impl Selector {
+                pub fn new() -> Self {
+                    Self {
+                        meta: MetaSelector::None
+                    }
+                }
+            }
+
             #[derive(Debug, Clone, Serialize, Deserialize)]
             pub enum MetaSelector {
                 None,
@@ -500,7 +509,7 @@ pub mod mesh {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, Signal, CloseReason};
+        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseSignal, CloseReason};
         use crate::version::v0_0_1::config::Info;
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -514,7 +523,7 @@ pub mod mesh {
         pub struct Response {
             pub from: Identifier,
             pub exchange_id: ExchangeId,
-            pub signal: Signal,
+            pub signal: ResponseSignal,
         }
 
         #[derive(Debug,Clone,Serialize,Deserialize)]
