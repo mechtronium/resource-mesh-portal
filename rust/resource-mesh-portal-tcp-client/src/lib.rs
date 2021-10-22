@@ -26,7 +26,12 @@ pub struct PortalTcpClient {
 impl PortalTcpClient {
 
     pub async fn new( host: String, client: Box<dyn PortalClient> ) -> Result<Self,Error> {
+println!("CLIENT attempt to connect: {}", host );
+
+        tokio::time::sleep(Duration::from_secs(0)).await;
         let stream = TcpStream::connect(host.clone()).await?;
+println!("CLIENT connected.");
+        tokio::time::sleep(Duration::from_secs(0)).await;
 
         let (reader,writer) = stream.into_split();
         let mut reader = PrimitiveFrameReader::new(reader);
@@ -64,8 +69,8 @@ impl PortalTcpClient {
         let mut writer : FrameWriter<mesh::inlet::Frame>  = FrameWriter::new(writer );
 
 
-        let (inlet_tx, mut inlet_rx) = mpsc::channel(128);
-        let (outlet_tx, mut outlet_rx) = mpsc::channel(128);
+        let (inlet_tx, mut inlet_rx) = mpsc::channel(1024 );
+        let (outlet_tx, mut outlet_rx) = mpsc::channel(1024 );
 
         {
             let logger = client.logger();

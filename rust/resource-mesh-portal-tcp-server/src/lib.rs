@@ -85,21 +85,26 @@ impl PortalTcpServer {
         let router = Box::new(RouterProxy::new(self.server.clone()));
         let port = self.port.clone();
         let muxer = PortalMuxer::new(router);
+println!("SERVER: start");
         {
             let alive = alive.clone();
             let broadcaster_tx = self.broadcaster_tx.clone();
             let muxer = muxer.clone();
+println!("SERVER: pre-spawn");
             tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(0)).await;
+println!("SERVER: call loop");
                 while let Option::Some(call) = server_rx.recv().await {
                     match call {
                         PortalServerCall::InjectMessage(_) => {}
                         PortalServerCall::ListenEvents(tx) => {
+println!("SERVER: RECEIVED request for broadcast_Tx");
                             tx.send( broadcaster_tx.subscribe() );
                         },
                         PortalServerCall::Shutdown  => {
                             broadcaster_tx.send(Event::Shutdown).unwrap_or_default();
                             alive.lock().await.alive = false;
-                            match std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
+                            match std::net::TcpStream::connect(format!("localhost:{}", port)) {
                                 Ok(_) => {}
                                 Err(_) => {}
                             }
@@ -110,14 +115,21 @@ impl PortalTcpServer {
             });
         }
 
+
         {
             let alive = alive.clone();
             tokio::spawn(async move {
-                match std::net::TcpListener::bind(format!("127.0.0.1:{}", self.port)) {
+
+                let addr = format!("localhost:{}", self.port);
+                match std::net::TcpListener::bind(addr.clone()) {
+
+
                     Ok(std_listener) => {
+                        tokio::time::sleep(Duration::from_secs(0)).await;
                         let listener = TcpListener::from_std(std_listener).unwrap();
                         self.broadcaster_tx.send( Event::Status(Status::Ready) ).unwrap_or_default();
-println!("STARTED LISTENING");
+                        tokio::time::sleep(Duration::from_secs(0)).await;
+println!("STARTED LISTENING addr {}", addr);
                         while let Ok((stream, _)) = listener.accept().await {
                             {
 println!("CONNECTION:w");
