@@ -75,13 +75,11 @@ pub mod resource {
     use crate::version::v0_0_1::resource;
 
     use crate::version::v0_0_1::{State, generic};
-    use crate::version::v0_0_1::generic::{ExtOperation, Generic, Identifier};
-    use crate::version::v0_0_1::generic::resource::Archetype;
 
     pub type Status = resource::Status;
 
-    pub type Operation=generic::resource::Operation<Key,Address,Kind>;
-    pub type ResourceOperation=generic::resource::ResourceOperation<Key,Address,Kind>;
+    pub type Operation=generic::operation::Operation<Key,Address,Kind>;
+    pub type ResourceOperation=generic::operation::ResourceOperation<Key,Address,Kind>;
     pub type Create=generic::resource::Create<Key,Address,Kind>;
 
     pub type StateSrc=generic::resource::StateSrc;
@@ -89,6 +87,8 @@ pub mod resource {
     pub type AddressSrc=generic::resource::AddressSrc;
     pub type Selector=generic::resource::Selector;
     pub type MetaSelector=generic::resource::MetaSelector;
+    pub type ResourceStub = generic::resource::ResourceStub<Key,Address,Kind>;
+    pub type Archetype = generic::resource::Archetype<Kind>;
 }
 
 pub mod config {
@@ -123,7 +123,6 @@ pub mod delivery {
 pub mod operation {
     use crate::version::latest::id::{Key, Address, Kind};
 
-    use crate::version::v0_0_1::{Generic, State, http};
     use crate::version::v0_0_1::generic::resource::{Create, Selector};
     use crate::version::v0_0_1::generic::operation;
 
@@ -142,8 +141,7 @@ pub mod portal {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseEntity, Status, CloseReason, generic};
-        use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseEntity, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
+        use crate::version::v0_0_1::generic;
 
         pub type Request=generic::portal::inlet::Request<Key,Address,Kind>;
         pub type Response=generic::portal::inlet::Response<Key,Address,Kind>;
@@ -158,13 +156,11 @@ pub mod portal {
 
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
+        use crate::version::v0_0_1::generic;
 
-        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseEntity, CloseReason, generic};
-        use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseEntity, BinParcel, CloseReason, PrimitiveFrame};
 
         pub type Request=generic::portal::outlet::Request<Key,Address,Kind>;
         pub type Response=generic::portal::outlet::Response<Key,Address,Kind>;
         pub type Frame=generic::portal::outlet::Frame<Key,Address,Kind>;
-        pub type CommandEvent=generic::portal::outlet::CommandEvent;
     }
 }

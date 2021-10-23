@@ -135,35 +135,3 @@ unimplemented!();
     }
 }
 
-pub struct VersionNegotiator {
-
-}
-
-impl VersionNegotiator {
-    pub fn negotiate( &self, range: String ) -> Result<Box<dyn VersionMigration<v0_0_1::portal::outlet::Frame>>,Error> {
-        Err(anyhow!("blah"))
-    }
-}
-
-
-pub trait VersionMigration<FRAME> {
-    fn migrate( &self, frame: FRAME ) -> Option<Result<Vec<u8>,Error>>;
-}
-
-
-pub struct IdentityVersionMigration {
-}
-
-impl VersionMigration<v0_0_1::portal::outlet::Frame> for IdentityVersionMigration {
-    fn migrate(&self, frame: v0_0_1::portal::outlet::Frame) -> Option<Result<Vec<u8>,Error>> {
-        let result = bincode::serialize(&frame);
-        match result {
-            Ok(data) => {
-                Option::Some(Ok(data))
-            }
-            Err(err) => {
-                Option::Some(Result::Err(anyhow!(err)))
-            }
-        }
-    }
-}

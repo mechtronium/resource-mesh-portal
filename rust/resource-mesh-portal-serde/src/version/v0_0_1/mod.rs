@@ -7,7 +7,6 @@ use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::fmt::Debug;
-use crate::version::v0_0_1::generic::Bin;
 use crate::version::v0_0_1::bin::Bin;
 
 
@@ -19,21 +18,24 @@ pub type Port=String;
 
 pub mod id {
     use crate::version::v0_0_1::generic;
+    use serde::{Serialize,Deserialize};
 
     pub type Key = String;
     pub type Address = String;
     pub type Kind = String;
 
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum IdentifierKind {
         Key,
         Address
     }
 
-    pub type Identifiers = generic::id::Identifiers<Key, Address>;
-    pub type Identifier = generic::id::Identifier<Key, Address>;
+    pub type Identifier = generic::id::Identifier<Key,Address>;
+    pub type Identifiers = generic::id::Identifiers<Key,Address>;
 }
 
 pub mod messaging {
+    use serde::{Serialize,Deserialize};
     pub type ExchangeId = String;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +59,7 @@ pub mod messaging {
 
 
 pub mod log {
+    use serde::{Serialize,Deserialize};
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum Log {
         Warn(String),
@@ -79,6 +82,7 @@ pub mod log {
 
 pub mod frame {
     use std::convert::TryInto;
+    use serde::{Serialize,Deserialize};
     use anyhow::Error;
 
     pub struct PrimitiveFrame {
@@ -116,6 +120,7 @@ pub mod frame {
 }
 
 pub mod bin {
+    use serde::{Serialize,Deserialize};
     use std::sync::Arc;
 
     pub type BinSrc=String;
@@ -136,6 +141,7 @@ pub mod bin {
 }
 
 pub mod delivery {
+    use serde::{Serialize,Deserialize};
     use crate::version::v0_0_1::bin::Bin;
     use std::collections::HashMap;
     use crate::version::v0_0_1::id::{Key, Address, Kind};
@@ -154,6 +160,8 @@ pub mod delivery {
 }
 
 pub mod command {
+
+    use serde::{Serialize,Deserialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Command {
@@ -177,12 +185,12 @@ pub mod command {
 }
 
 pub mod http {
+
     use std::collections::HashMap;
 
     use serde::{Deserialize, Serialize};
 
     use crate::version::v0_0_1::Bin;
-    use crate::version::v0_0_1::generic::Bin;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct HttpRequest {
@@ -211,10 +219,13 @@ pub mod http {
 
 
 pub mod config {
+
+    use serde::{Serialize,Deserialize};
     use crate::version::v0_0_1::id::{Key, Address, Kind};
 
-    use crate::version::v0_0_1::{generic, Kind, ArtifactRef};
+    use crate::version::v0_0_1::generic;
     use std::collections::HashMap;
+    use crate::version::latest::ArtifactRef;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum PortalKind {
@@ -322,8 +333,8 @@ pub mod operation {
 
     use crate::version::v0_0_1::id::{Key, Address, Kind};
 
-    use crate::version::v0_0_1::{Generic, State, http};
-    use crate::version::v0_0_1::generic::resource::{Create, Selector};
+    use crate::version::v0_0_1::{State, http};
+    use crate::version::v0_0_1::generic;
     use crate::version::v0_0_1::generic::operation;
 
     pub type Operation = operation::Operation<Key,Address,Kind>;
@@ -335,6 +346,7 @@ pub mod operation {
 pub mod resource {
     use crate::version::v0_0_1::id::{Key, Address, Kind};
     use serde::{Deserialize, Serialize};
+    use crate::version::v0_0_1::generic;
 
     #[derive(Debug, Clone, Serialize, Deserialize, strum_macros::Display)]
     pub enum Status {
@@ -345,12 +357,7 @@ pub mod resource {
         Done
     }
 
-    use crate::version::v0_0_1::{ExtOperation, Identifier, State, generic, Key, Address, Kind};
-    use crate::version::v0_0_1::generic::{ExtOperation, Generic, Identifier};
-    use crate::version::v0_0_1::generic::resource::Archetype;
 
-    pub type Operation=generic::resource::Operation<Key,Address,Kind>;
-    pub type ResourceOperation=generic::resource::ResourceOperation<Key,Address,Kind>;
     pub type Create=generic::resource::Create<Key,Address,Kind>;
 
     pub type StateSrc=generic::resource::StateSrc;
@@ -358,6 +365,7 @@ pub mod resource {
     pub type AddressSrc=generic::resource::AddressSrc;
     pub type Selector=generic::resource::Selector;
     pub type MetaSelector=generic::resource::MetaSelector;
+    pub type ResourceStub = generic::resource::ResourceStub<Key,Address,Kind>;
 }
 
 pub mod portal {
@@ -368,9 +376,8 @@ pub mod portal {
 
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
+        use crate::version::v0_0_1::generic;
 
-        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseEntity, Status, CloseReason, generic, Key, Address, Kind};
-        use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseEntity, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
 
         pub type Request=generic::portal::inlet::Request<Key,Address,Kind>;
         pub type Response=generic::portal::inlet::Response<Key,Address,Kind>;
@@ -384,14 +391,12 @@ pub mod portal {
 
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
-
-        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseEntity, CloseReason, Key, Address, Kind, generic};
-        use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseEntity, BinParcel, CloseReason, PrimitiveFrame};
+        use crate::version::v0_0_1::generic;
 
         pub type Request=generic::portal::outlet::Request<Key,Address,Kind>;
         pub type Response=generic::portal::outlet::Response<Key,Address,Kind>;
         pub type Frame=generic::portal::outlet::Frame<Key,Address,Kind>;
-        pub type CommandEvent=generic::portal::outlet::CommandEvent;
+
     }
 }
 
@@ -405,22 +410,25 @@ pub mod generic {
     use serde::{Deserialize, Serialize};
     use std::hash::Hash;
     use std::fmt::Debug;
-    use crate::version::v0_0_1::{ExchangeId, BinSrc, BinRaw, CliId, Generic, Payload, http};
-    use crate::version::v0_0_1::generic::delivery::Entity;
+    use std::str::FromStr;
 
-    pub trait Generic: Debug + Clone + Serialize + Deserialize + Eq + PartialEq + Hash + Send + Sync {}
+    //pub trait Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync {}
 
     pub mod id {
-        use crate::version::v0_0_1::generic::Generic;
+        use serde::{Serialize,Deserialize};
+        use crate::version::v0_0_1::generic;
+        use std::fmt::Debug;
+        use std::hash::Hash;
+        use std::str::FromStr;
 
         #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
-        pub enum Identifier<KEY: Generic, ADDRESS: Generic> {
+        pub enum Identifier<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             Key(KEY),
             Address(ADDRESS)
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
-        pub struct Identifiers<KEY: Generic, ADDRESS: Generic> {
+        pub struct Identifiers<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             pub key: KEY,
             pub address: ADDRESS
         }
@@ -430,15 +438,18 @@ pub mod generic {
 
 
     pub mod config {
-        use crate::version::v0_0_1::generic::{Identifier, Identifiers, Generic};
-        use crate::version::v0_0_1::generic::resource::Archetype;
+        use serde::{Serialize,Deserialize};
         use crate::version::v0_0_1::config::{PortalKind, Config};
-        use crate::version::v0_0_1::generic::id::{Identifier, Identifiers};
         use crate::version::v0_0_1::ArtifactRef;
+        use std::fmt::Debug;
+        use std::hash::Hash;
+        use std::str::FromStr;
+        use crate::version::v0_0_1::generic::id::{Identifier, Identifiers};
+        use crate::version::v0_0_1::generic::resource::Archetype;
 
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct Info<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub struct Info<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             pub key: KEY,
             pub address: ADDRESS,
             pub owner: String,
@@ -449,7 +460,7 @@ pub mod generic {
             pub kind: PortalKind
         }
 
-        impl <KEY: Generic, ADDRESS: Generic, KIND: Generic> Info<KEY, ADDRESS, KIND> {
+        impl <KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> Info<KEY, ADDRESS, KIND> {
             pub fn identity(&self) -> Identifiers<KEY,ADDRESS> {
                 Identifiers {
                     key: self.key.clone(),
@@ -460,19 +471,23 @@ pub mod generic {
     }
 
     pub mod operation {
-        use crate::version::v0_0_1::{Generic, State, http};
+        use serde::{Serialize,Deserialize};
+        use crate::version::v0_0_1::generic;
+        use crate::version::latest::{State, http};
+        use serde::__private::fmt::Debug;
+        use std::hash::Hash;
+        use std::str::FromStr;
         use crate::version::v0_0_1::generic::resource::{Create, Selector};
         use crate::version::v0_0_1::generic::delivery::Entity;
-        use crate::version::v0_0_1::generic::Generic;
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum Operation<KEY: Generic, ADDRESS: Generic, KIND: Generic>  {
+        pub enum Operation<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync>  {
             Resource(ResourceOperation<KEY,ADDRESS,KIND>),
             Ext(ExtOperation<KEY,ADDRESS,KIND>)
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum ResourceOperation<KEY: Generic, ADDRESS: Generic, KIND: Generic>  {
+        pub enum ResourceOperation<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync>  {
             Create(Create<KEY,ADDRESS,KIND>),
             Select(Selector),
             Get,
@@ -481,13 +496,13 @@ pub mod generic {
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum ExtOperation<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub enum ExtOperation<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             Http(http::HttpRequest),
             Port(PortOperation<KEY,ADDRESS,KIND>)
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct PortOperation<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub struct PortOperation<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             pub port: String,
             pub entity: Entity<KEY,ADDRESS,KIND>
         }
@@ -496,12 +511,15 @@ pub mod generic {
 
     pub mod resource {
         use serde::{Deserialize, Serialize};
-        use crate::version::v0_0_1::{Generic, State};
-        use crate::version::v0_0_1::generic::{Identifier, Generic};
+        use crate::version::v0_0_1::State;
+        use crate::version::v0_0_1::generic;
+        use std::fmt::Debug;
+        use std::hash::Hash;
+        use std::str::FromStr;
         use crate::version::v0_0_1::generic::id::Identifier;
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct Archetype<KIND: Generic> {
+        pub struct Archetype<KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             pub kind: KIND,
             pub specific: Option<String>,
             pub config_src: Option<String>
@@ -509,7 +527,7 @@ pub mod generic {
 
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct ResourceStub<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub struct ResourceStub<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             pub id: Identifier<KEY,ADDRESS>,
             pub key: KEY,
             pub address: ADDRESS,
@@ -519,7 +537,7 @@ pub mod generic {
 
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct Create<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub struct Create<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             pub parent: Identifier<KEY,ADDRESS>,
             pub archetype: Archetype<KIND>,
             pub address: AddressSrc,
@@ -575,28 +593,30 @@ pub mod generic {
 
             use anyhow::Error;
             use serde::{Deserialize, Serialize};
-
-            use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseEntity, Status, CloseReason};
-            use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseEntity, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
-            use crate::version::v0_0_1::generic::portal::inlet::resource::Operation;
-            use crate::version::v0_0_1::generic::delivery::ResponseEntity;
+            use crate::version::v0_0_1::messaging::ExchangeKind;
+            use crate::version::v0_0_1::messaging::ExchangeId;
             use crate::version::v0_0_1::log::Log;
             use crate::version::v0_0_1::command::Command;
+            use crate::version::v0_0_1::resource::Status;
             use crate::version::v0_0_1::bin::BinParcel;
             use crate::version::v0_0_1::frame::{CloseReason, PrimitiveFrame};
-            use crate::version::v0_0_1::resource::Status;
-            use crate::version::v0_0_1::generic::operation::Operation;
+            use crate::version::v0_0_1::id::{Address, Kind, Key};
+            use std::fmt::Debug;
             use crate::version::v0_0_1::generic::id::Identifier;
-            use crate::version::v0_0_1::messaging::{ExchangeKind, ExchangeId};
+            use crate::version::v0_0_1::generic::operation::Operation;
+            use std::hash::Hash;
+            use std::str::FromStr;
+            use crate::version::v0_0_1::generic::delivery::ResponseEntity;
+
 
             #[derive(Debug, Clone, Serialize, Deserialize)]
-            pub struct Request<KEY: Generic, ADDRESS: Generic, KIND: Generic>  {
+            pub struct Request<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync>  {
                 pub to: Vec<Identifier<KEY,ADDRESS>>,
                 pub operation: Operation<KEY,ADDRESS,KIND>,
                 pub kind: ExchangeKind,
             }
 
-            impl <KEY: Generic, ADDRESS: Generic, KIND: Generic> Request<KEY,ADDRESS,KIND> {
+            impl <KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> Request<KEY,ADDRESS,KIND> {
                 pub fn new(operation: Operation<KEY,ADDRESS,KIND>) -> Self {
                     Self {
                         to: vec![],
@@ -607,14 +627,14 @@ pub mod generic {
             }
 
             #[derive(Debug, Clone, Serialize, Deserialize)]
-            pub struct Response<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+            pub struct Response<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
                 pub to: Identifier<KEY,ADDRESS>,
                 pub exchange_id: ExchangeId,
                 pub signal: ResponseEntity<KEY,ADDRESS,KIND>,
             }
 
             #[derive(Debug, Clone, Serialize, Deserialize, strum_macros::Display)]
-            pub enum Frame<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+            pub enum Frame<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
                 Log(Log),
                 Command(Command),
                 Request(Request<KEY,ADDRESS,KIND>),
@@ -624,7 +644,7 @@ pub mod generic {
                 Close(CloseReason)
             }
 
-            impl <KEY: Generic, ADDRESS: Generic, KIND: Generic> TryInto<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND> {
+            impl <KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> TryInto<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND> {
                 type Error = Error;
 
                 fn try_into(self) -> Result<PrimitiveFrame, Self::Error> {
@@ -635,7 +655,7 @@ pub mod generic {
                 }
             }
 
-            impl <KEY: Generic, ADDRESS: Generic, KIND: Generic> TryFrom<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND>{
+            impl TryFrom<PrimitiveFrame> for Frame<Key,Address,Kind>{
                 type Error = Error;
 
                 fn try_from(value: PrimitiveFrame) -> Result<Self, Self::Error> {
@@ -643,6 +663,18 @@ pub mod generic {
                     Ok(frame)
                 }
             }
+
+            /*
+            impl <KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> TryFrom<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND>{
+                type Error = Error;
+
+                fn try_from(value: PrimitiveFrame) -> Result<Self, Self::Error> {
+                    let frame = bincode::deserialize(value.data.as_slice())?;
+                    Ok(frame)
+                }
+            }
+
+             */
         }
 
         pub mod outlet {
@@ -651,34 +683,36 @@ pub mod generic {
 
             use anyhow::Error;
             use serde::{Deserialize, Serialize};
-
-            use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseEntity, CloseReason};
-            use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseEntity, BinParcel, CloseReason, PrimitiveFrame};
-            use crate::version::v0_0_1::generic::config::Info;
-            use crate::version::v0_0_1::frame::{CloseReason, PrimitiveFrame};
-            use crate::version::v0_0_1::generic::delivery::ResponseEntity;
+            use crate::version::v0_0_1::messaging::{ExchangeKind, ExchangeId};
+            use crate::version::v0_0_1::generic;
             use crate::version::v0_0_1::command::CommandEvent;
             use crate::version::v0_0_1::bin::BinParcel;
-            use crate::version::v0_0_1::generic::operation::ExtOperation;
+            use crate::version::v0_0_1::frame::{CloseReason, PrimitiveFrame};
+            use std::fmt::Debug;
+            use std::hash::Hash;
+            use std::str::FromStr;
             use crate::version::v0_0_1::generic::id::Identifier;
-            use crate::version::v0_0_1::messaging::{ExchangeKind, ExchangeId};
+            use crate::version::v0_0_1::generic::operation::ExtOperation;
+            use crate::version::v0_0_1::generic::delivery::ResponseEntity;
+            use crate::version::v0_0_1::generic::config::Info;
+            use crate::version::v0_0_1::id::{Key, Address, Kind};
 
             #[derive(Debug, Clone, Serialize, Deserialize)]
-            pub struct Request<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+            pub struct Request<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
                 pub from: Identifier<KEY,ADDRESS>,
                 pub operation: ExtOperation<KEY,ADDRESS,KIND>,
                 pub kind: ExchangeKind
             }
 
             #[derive(Debug, Clone, Serialize, Deserialize)]
-            pub struct Response<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+            pub struct Response<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
                 pub from: Identifier<KEY,ADDRESS>,
                 pub exchange_id: ExchangeId,
                 pub signal: ResponseEntity<KEY,ADDRESS,KIND>,
             }
 
             #[derive(Debug, Clone, Serialize, Deserialize, strum_macros::Display)]
-            pub enum Frame<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+            pub enum Frame<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
                 Init(Info<KEY,ADDRESS,KIND>),
                 CommandEvent(CommandEvent),
                 Request(Request<KEY,ADDRESS,KIND>),
@@ -687,7 +721,7 @@ pub mod generic {
                 Close(CloseReason)
             }
 
-            impl <KEY: Generic, ADDRESS: Generic, KIND: Generic> TryInto<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND> {
+            impl <KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> TryInto<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND> {
                 type Error = Error;
 
                 fn try_into(self) -> Result<PrimitiveFrame, Self::Error> {
@@ -698,7 +732,8 @@ pub mod generic {
                 }
             }
 
-            impl <KEY: Generic, ADDRESS: Generic, KIND: Generic> TryFrom<PrimitiveFrame> for Frame<KEY,ADDRESS,KIND> {
+
+            impl TryFrom<PrimitiveFrame> for Frame<Key,Address,Kind> {
                 type Error = Error;
 
                 fn try_from(value: PrimitiveFrame) -> Result<Self, Self::Error> {
@@ -712,14 +747,16 @@ pub mod generic {
     pub mod delivery {
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::resource::ResourceStub;
         use crate::version::v0_0_1::{State, http};
-        use crate::version::v0_0_1::generic::Generic;
-        use crate::version::v0_0_1::generic::resource::ResourceStub;
         use crate::version::v0_0_1::delivery::Payload;
+        use crate::version::v0_0_1::generic;
+        use std::fmt::Debug;
+        use std::hash::Hash;
+        use std::str::FromStr;
+        use crate::version::v0_0_1::generic::resource::ResourceStub;
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum Entity<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub enum Entity<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             Empty,
             Resource(ResourceEntity<KEY,ADDRESS,KIND>),
             Payload(Payload),
@@ -727,7 +764,7 @@ pub mod generic {
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum ResourceEntity<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub enum ResourceEntity<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             None,
             Stub(ResourceStub<KEY,ADDRESS,KIND>),
             Stubs(Vec<ResourceStub<KEY,ADDRESS,KIND>>),
@@ -735,7 +772,7 @@ pub mod generic {
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub enum ResponseEntity<KEY: Generic, ADDRESS: Generic, KIND: Generic> {
+        pub enum ResponseEntity<KEY: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, ADDRESS: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync, KIND: Debug + Clone + Serialize + Eq + PartialEq + Hash + ToString + FromStr + Send + Sync> {
             Ok(Entity<KEY,ADDRESS,KIND>),
             Error(String)
         }

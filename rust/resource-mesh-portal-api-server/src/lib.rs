@@ -15,7 +15,6 @@ use uuid::Uuid;
 
 use std::future::Future;
 use resource_mesh_portal_serde::version::latest::log::Log;
-use resource_mesh_portal_serde::version::latest::ExchangeId;
 use resource_mesh_portal_serde::version::latest::portal::{inlet, outlet};
 use resource_mesh_portal_serde::version::latest::id::{Identifier, Address, Key};
 use resource_mesh_portal_serde::version::latest::messaging::{ExchangeId, ExchangeKind};

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use crate::version::v0_0_1::Log;
+use crate::version::latest::log::Log;
 
 pub mod version;
 

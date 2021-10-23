@@ -8,16 +8,17 @@ extern crate anyhow;
 
 use resource_mesh_portal_tcp_common::{PrimitiveFrameReader, PrimitiveFrameWriter, FrameWriter, FrameReader};
 use anyhow::Error;
-use resource_mesh_portal_api_client::{Portal, PortalCtrl, PortalSkel, InletApi, Inlet};
+use resource_mesh_portal_api_client::{Portal, PortalCtrl, PortalSkel, InletApi, Inlet };
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use resource_mesh_portal_serde::version::v0_0_1::{mesh, Log};
+use resource_mesh_portal_serde::version::latest::portal;
+use resource_mesh_portal_serde::version::latest::log::Log;
 use tokio::sync::mpsc::error::TrySendError;
 use resource_mesh_portal_serde::version;
 use std::thread;
 use tokio::time::Duration;
-
+use resource_mesh_portal_serde::version::latest::portal::{outlet, inlet};
 
 
 pub struct PortalTcpClient {
@@ -56,8 +57,8 @@ impl PortalTcpClient {
             return Err(anyhow!(message));
         }
 
-        let mut reader : FrameReader<mesh::outlet::Frame> = FrameReader::new(reader );
-        let mut writer : FrameWriter<mesh::inlet::Frame>  = FrameWriter::new(writer );
+        let mut reader : FrameReader<outlet::Frame> = FrameReader::new(reader );
+        let mut writer : FrameWriter<inlet::Frame>  = FrameWriter::new(writer );
 
 
         let (inlet_tx, mut inlet_rx) = mpsc::channel(1024 );
@@ -85,7 +86,7 @@ impl PortalTcpClient {
         });
 
 
-        if let mesh::outlet::Frame::Init(info) = reader.read( ).await?  {
+        if let outlet::Frame::Init(info) = reader.read( ).await?  {
             let portal = Portal::new(info, inlet, client.portal_ctrl_factory(), client.logger()).await?;
 
 
@@ -126,12 +127,12 @@ pub trait PortalClient: Send+Sync {
 }
 
 struct TcpInlet {
-    pub sender: mpsc::Sender<mesh::inlet::Frame>,
+    pub sender: mpsc::Sender<inlet::Frame>,
     pub logger: fn( message: &str )
 }
 
 impl Inlet for TcpInlet {
-    fn send_frame(&self, frame: mesh::inlet::Frame) {
+    fn send_frame(&self, frame: inlet::Frame) {
         match self.sender.try_send(frame)
         {
             Ok(_) => {}

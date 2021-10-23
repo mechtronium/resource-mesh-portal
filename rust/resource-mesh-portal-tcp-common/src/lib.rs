@@ -7,10 +7,11 @@ use std::convert::{TryFrom, TryInto};
 use anyhow::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncWrite};
 
-use resource_mesh_portal_serde::version::v0_0_1::{mesh, PrimitiveFrame, CloseReason};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use std::marker::PhantomData;
 use std::time::Duration;
+use resource_mesh_portal_serde::version::latest::frame::{PrimitiveFrame, CloseReason};
+use resource_mesh_portal_serde::version::latest::portal::{outlet, inlet};
 
 #[cfg(test)]
 mod tests {
@@ -35,28 +36,28 @@ impl <FRAME> FrameWriter<FRAME> where FRAME: TryInto<PrimitiveFrame>  {
     }
 }
 
-impl FrameWriter<mesh::outlet::Frame>  {
+impl FrameWriter<outlet::Frame>  {
 
-    pub async fn write( &mut self, frame: mesh::outlet::Frame ) -> Result<(),Error> {
+    pub async fn write( &mut self, frame: outlet::Frame ) -> Result<(),Error> {
         let frame = frame.try_into()?;
         self.stream.write(frame).await
     }
 
     pub async fn close( &mut self, reason: CloseReason ) {
-        self.write(mesh::outlet::Frame::Close(reason) ).await.unwrap_or_default();
+        self.write(outlet::Frame::Close(reason) ).await.unwrap_or_default();
     }
 
 }
 
-impl FrameWriter<mesh::inlet::Frame> {
+impl FrameWriter<inlet::Frame> {
 
-    pub async fn write( &mut self, frame: mesh::inlet::Frame ) -> Result<(),Error> {
+    pub async fn write( &mut self, frame: inlet::Frame ) -> Result<(),Error> {
         let frame = frame.try_into()?;
         self.stream.write(frame).await
     }
 
     pub async fn close( &mut self, reason: CloseReason ) {
-        self.write(mesh::inlet::Frame::Close(reason) ).await.unwrap_or_default();
+        self.write(inlet::Frame::Close(reason) ).await.unwrap_or_default();
     }
 }
 
@@ -75,17 +76,17 @@ impl <FRAME> FrameReader<FRAME>  where FRAME: TryFrom<PrimitiveFrame> {
     }
 }
 
-impl FrameReader<mesh::outlet::Frame> {
-    pub async fn read( &mut self ) -> Result<mesh::outlet::Frame,Error> {
+impl FrameReader<outlet::Frame> {
+    pub async fn read( &mut self ) -> Result<outlet::Frame,Error> {
         let frame = self.stream.read().await?;
-        Ok(mesh::outlet::Frame::try_from(frame)?)
+        Ok(outlet::Frame::try_from(frame)?)
     }
 }
 
-impl FrameReader<mesh::inlet::Frame> {
-    pub async fn read( &mut self ) -> Result<mesh::inlet::Frame,Error> {
+impl FrameReader<inlet::Frame> {
+    pub async fn read( &mut self ) -> Result<inlet::Frame,Error> {
         let frame = self.stream.read().await?;
-        Ok(mesh::inlet::Frame::try_from(frame)?)
+        Ok(inlet::Frame::try_from(frame)?)
     }
 }
 

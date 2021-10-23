@@ -20,12 +20,15 @@ use tokio::sync::{mpsc, oneshot, broadcast, Mutex};
 use tokio::sync::mpsc::error::SendTimeoutError;
 
 use resource_mesh_portal_api_server::{Message, MuxCall, Portal, PortalMuxer, Router};
-use resource_mesh_portal_serde::version::v0_0_1::{portal, PrimitiveFrame, Log, Status, CloseReason};
-use resource_mesh_portal_serde::version::v0_0_1::portal::inlet::resource::Operation;
 use resource_mesh_portal_tcp_common::{FrameReader, FrameWriter, PrimitiveFrameReader, PrimitiveFrameWriter};
 use resource_mesh_portal_serde::version::v0_0_1::config::Info;
 use tokio::runtime::Runtime;
 use std::thread;
+use resource_mesh_portal_serde::version::latest::frame::CloseReason;
+use resource_mesh_portal_serde::version::latest::resource::Status;
+use resource_mesh_portal_serde::version::latest::operation::Operation;
+use resource_mesh_portal_serde::version::latest::portal::{inlet, outlet};
+use resource_mesh_portal_serde::version::latest::log::Log;
 
 #[derive(Clone,strum_macros::Display)]
 pub enum Event {
@@ -191,8 +194,8 @@ impl PortalTcpServer {
                 tokio::time::sleep(Duration::from_secs(0)).await;
                 writer.write_string( "Ok".to_string() ).await?;
 
-                let mut reader : FrameReader<portal::inlet::Frame> = FrameReader::new(reader );
-                let mut writer : FrameWriter<portal::outlet::Frame>  = FrameWriter::new(writer );
+                let mut reader : FrameReader<inlet::Frame> = FrameReader::new(reader );
+                let mut writer : FrameWriter<outlet::Frame>  = FrameWriter::new(writer );
 
                 match self.server.info(user.clone() ).await {
                     Ok(info) => {
