@@ -14,18 +14,21 @@ use dashmap::DashMap;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use resource_mesh_portal_serde::version::v0_0_1::{Entity, ExchangeId, ExchangeKind, Identifier, Log, portal, Port, ResponseSignal, Status, ExtOperation, PortRequest};
-use resource_mesh_portal_serde::version::v0_0_1::config::Info;
-use resource_mesh_portal_serde::version::v0_0_1::portal::outlet::Frame;
+
 use std::prelude::rust_2021::TryFrom;
 use std::ops::Deref;
-use resource_mesh_portal_serde::version::v0_0_1::http::{HttpRequest, HttpResponse};
 use std::collections::HashMap;
-use resource_mesh_portal_serde::version::v0_0_1::portal::inlet::Response;
 use tokio::sync::watch::Receiver;
 use client::{Request,RequestContext};
 use resource_mesh_portal_serde::std_logger;
-
+use resource_mesh_portal_serde::version::latest::http::{HttpRequest, HttpResponse};
+use resource_mesh_portal_serde::version::latest::portal::{inlet, outlet};
+use resource_mesh_portal_serde::version::latest::resource::Status;
+use resource_mesh_portal_serde::version::latest::messaging::{ExchangeId, ExchangeKind};
+use resource_mesh_portal_serde::version::latest::config::Info;
+use resource_mesh_portal_serde::version::latest::log::Log;
+use resource_mesh_portal_serde::version::latest::operation::ExtOperation;
+use resource_mesh_portal_serde::version::latest::delivery::Entity;
 
 
 struct EmptySkel {
@@ -67,11 +70,11 @@ pub fn log(message: &str) {
 }
 
 pub trait Inlet: Sync+Send {
-    fn send_frame(&self, frame: portal::inlet::Frame);
+    fn send_frame(&self, frame: inlet::Frame);
 }
 
 pub trait Outlet: Sync+Send {
-    fn receive(&mut self, frame: portal::outlet::Frame);
+    fn receive(&mut self, frame: outlet::Frame);
 }
 
 pub struct StatusChamber {
@@ -86,7 +89,7 @@ impl StatusChamber{
     }
 }
 
-pub type Exchanges = Arc<DashMap<ExchangeId, oneshot::Sender<portal::outlet::Response>>>;
+pub type Exchanges = Arc<DashMap<ExchangeId, oneshot::Sender<outlet::Response>>>;
 pub type PortalStatus = Arc<RwLock<StatusChamber>>;
 
 
@@ -108,7 +111,7 @@ impl PortalSkel {
         {
             self.status.write().expect("expected to get status write lock").status = status.clone();
         }
-        self.inlet.send_frame(portal::inlet::Frame::Status(status));
+        self.inlet.send_frame(inlet::Frame::Status(status));
     }
 
     pub fn api(&self) -> InletApi {
@@ -134,7 +137,7 @@ impl Portal {
 
         let inlet :Arc<dyn Inlet>= inlet.into();
         let status = Arc::new(RwLock::new(StatusChamber::new( Status::Initializing )));
-        inlet.send_frame(portal::inlet::Frame::Status(Status::Initializing));
+        inlet.send_frame(inlet::Frame::Status(Status::Initializing));
         let exchanges = Arc::new(DashMap::new());
         let skel =  PortalSkel {
             info: info.clone(),
@@ -158,18 +161,18 @@ impl Portal {
     }
 
     pub fn log( &self, log: Log ) {
-        self.skel.inlet.send_frame(portal::inlet::Frame::Log(log));
+        self.skel.inlet.send_frame(inlet::Frame::Log(log));
     }
 
 }
 
 #[async_trait]
 impl Outlet for Portal {
-    fn receive(&mut self, frame: Frame) {
+    fn receive(&mut self, frame: outlet::Frame) {
         match self.skel.status() {
             Status::Ready => match frame {
-                Frame::CommandEvent(_) => {}
-                Frame::Request(request) => {
+                outlet::Frame::CommandEvent(_) => {}
+                outlet::Frame::Request(request) => {
                     let ctrl = self.ctrl.clone();
                     let inlet_api = self.skel.api();
                     let skel = self.skel.clone();
@@ -189,7 +192,7 @@ impl Outlet for Portal {
                                             let result = ctrl.http_request(request).await;
                                             match result {
                                                 Ok(response) => {
-                                                    let response = portal::inlet::Response {
+                                                    let response = inlet::Response {
                                                         to: from,
                                                         exchange_id:exchange_id.clone(),
                                                         signal: ResponseSignal::Ok(Entity::HttpResponse(response))
@@ -198,7 +201,7 @@ impl Outlet for Portal {
                                                 }
                                                 Err(err) => {
                                                     (skel.logger)(format!("ERROR: HttpRequest.path: '{}' error: '{}' ",  path, err.to_string()).as_str());
-                                                    let response = portal::inlet::Response {
+                                                    let response = inlet::Response {
                                                         to: from,
                                                         exchange_id:exchange_id.clone(),
                                                         signal: ResponseSignal::Ok(Entity::HttpResponse(HttpResponse::server_side_error()))
@@ -229,7 +232,7 @@ impl Outlet for Portal {
                                                             Some(signal) => {
                                                                 if let ExchangeKind::RequestResponse(exchange_id) = &kind
                                                                 {
-                                                                   let response = portal::inlet::Response {
+                                                                   let response = inlet::Response {
                                                                        to: request_from,
                                                                        exchange_id: exchange_id.clone(),
                                                                        signal
@@ -246,7 +249,7 @@ impl Outlet for Portal {
                                                                 (skel.logger)(message.as_str());
                                                                 if let ExchangeKind::RequestResponse(exchange_id) = &kind
                                                                 {
-                                                                    let response = portal::inlet::Response {
+                                                                    let response = inlet::Response {
                                                                         to: request_from,
                                                                         exchange_id: exchange_id.clone(),
                                                                         signal: ResponseSignal::Error(message)
@@ -261,7 +264,7 @@ impl Outlet for Portal {
                                                         (skel.logger)(message.as_str());
                                                         if let ExchangeKind::RequestResponse(exchange_id) = &kind
                                                         {
-                                                            let response = portal::inlet::Response {
+                                                            let response = inlet::Response {
                                                                 to: request_from,
                                                                 exchange_id: exchange_id.clone(),
                                                                 signal: ResponseSignal::Error(message)
@@ -277,7 +280,7 @@ impl Outlet for Portal {
                                                 (skel.logger)(message.as_str());
                                                 if let ExchangeKind::RequestResponse(exchange_id) = &kind
                                                 {
-                                                    let response = portal::inlet::Response {
+                                                    let response = inlet::Response {
                                                         to: from,
                                                         exchange_id: exchange_id.clone(),
                                                         signal: ResponseSignal::Error(message)
@@ -293,7 +296,7 @@ impl Outlet for Portal {
                                         (skel.logger)(message.as_str());
                                         if let ExchangeKind::RequestResponse(exchange_id) = &kind
                                         {
-                                            let response = portal::inlet::Response {
+                                            let response = inlet::Response {
                                                 to: from,
                                                 exchange_id: exchange_id.clone(),
                                                 signal: ResponseSignal::Error(message)
@@ -306,7 +309,7 @@ impl Outlet for Portal {
                         }
                     });
                 }
-                Frame::Response(response) => {
+                outlet::Frame::Response(response) => {
                     if let Option::Some((_,tx)) =
                         self.skel.exchanges.remove(&response.exchange_id)
                     {
@@ -315,8 +318,8 @@ impl Outlet for Portal {
                         (self.skel.logger)("SEVERE: do not have a matching exchange_id for response");
                     }
                 }
-                Frame::BinParcel(_) => {}
-                Frame::Close(_) => {}
+                outlet::Frame::BinParcel(_) => {}
+                outlet::Frame::Close(_) => {}
                 _ => {
                     (self.skel.logger)(format!("SEVERE: frame ignored because status: '{}' does not allow handling of frame '{}'",self.skel.status().to_string(),frame.to_string()).as_str());
                 }
@@ -347,46 +350,48 @@ impl InletApi {
     }
 
 
-    pub fn notify(&self, request: portal::inlet::Request) {
+    pub fn notify(&self, request: inlet::Request) {
         let mut request = request;
         if let ExchangeKind::None = request.kind {
         } else {
             (self.logger)(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string()));
         }
         request.kind = ExchangeKind::Notification;
-        self.inlet.send_frame(portal::inlet::Frame::Request(request));
+        self.inlet.send_frame(inlet::Frame::Request(request));
     }
 
     pub async fn exchange(
         &mut self,
-        request: portal::inlet::Request
-    ) -> Result<portal::outlet::Response, Error> {
+        request: inlet::Request
+    ) -> Result<outlet::Response, Error> {
         if let ExchangeKind::None = request.kind {
         } else {
-            self.inlet.send_frame(portal::inlet::Frame::Log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
+            self.inlet.send_frame(inlet::Frame::Log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
         }
         let mut request = request;
         let exchange_id: ExchangeId = Uuid::new_v4().to_string();
         request.kind = ExchangeKind::RequestResponse(exchange_id.clone());
         let (tx,rx) = oneshot::channel();
         self.exchanges.insert(exchange_id, tx);
-        self.inlet.send_frame(portal::inlet::Frame::Request(request));
+        self.inlet.send_frame(inlet::Frame::Request(request));
 
         let result = tokio::time::timeout(Duration::from_secs(self.info.config.response_timeout.clone()),rx).await;
         Ok(result??)
     }
 
-    pub fn respond( &self, response: portal::inlet::Response ) {
-        self.inlet.send_frame( portal::inlet::Frame::Response(response) );
+    pub fn respond( &self, response: inlet::Response ) {
+        self.inlet.send_frame( inlet::Frame::Response(response) );
     }
 }
 
 pub mod client {
-    use resource_mesh_portal_serde::version::v0_0_1::config::Info;
-    use resource_mesh_portal_serde::version::v0_0_1::{Identifier, portal, PortRequest, ExtOperation};
     use std::ops::Deref;
-    use resource_mesh_portal_serde::version::v0_0_1::http::HttpRequest;
     use anyhow::Error;
+    use resource_mesh_portal_serde::version::latest::portal::outlet;
+    use resource_mesh_portal_serde::version::latest::id::Identifier;
+    use resource_mesh_portal_serde::version::latest::operation::ExtOperation;
+    use resource_mesh_portal_serde::version::latest::config::Info;
+    use resource_mesh_portal_serde::version::latest::http::HttpRequest;
 
     #[derive(Clone)]
     pub struct RequestContext {
@@ -418,7 +423,7 @@ pub mod client {
     }
 
     impl Request<HttpRequest> {
-        pub fn try_from_http(request: portal::outlet::Request, context: RequestContext) -> Result<Request<HttpRequest>, Error> {
+        pub fn try_from_http(request: outlet::Request, context: RequestContext) -> Result<Request<HttpRequest>, Error> {
             if let ExtOperation::Http(http_request) = request.operation {
                 Ok(Self {
                     context,
@@ -432,7 +437,7 @@ pub mod client {
     }
 
     impl Request<PortRequest> {
-        pub fn try_from_port(request: portal::outlet::Request, context: RequestContext) -> Result<Request<PortRequest>, Error> {
+        pub fn try_from_port(request: outlet::Request, context: RequestContext) -> Result<Request<PortRequest>, Error> {
             if let ExtOperation::Port(port_request) = request.operation {
                 Ok(Self {
                     context,
@@ -454,10 +459,11 @@ pub mod example {
 
     use resource_mesh_portal_serde::version::v0_0_1::{Entity, ExtOperation, portal, Payload, PortRequest, ResponseSignal, Identifier};
 
-    use crate::{InletApi, PortalCtrl, PortalSkel, Request};
-    use resource_mesh_portal_serde::version::v0_0_1::portal::inlet::resource::Operation;
-    use resource_mesh_portal_serde::version::v0_0_1::http::{HttpRequest, HttpResponse};
+    use crate::{InletApi, PortalCtrl, PortalSkel, Request, inlet};
     use std::collections::HashMap;
+    use resource_mesh_portal_serde::version::latest::operation::{Operation, ExtOperation};
+    use resource_mesh_portal_serde::version::latest::delivery::{Entity, Payload};
+    use resource_mesh_portal_serde::version::latest::id::Identifier;
 
     pub struct HelloCtrl {
         pub skel: Arc<PortalSkel>,
@@ -476,7 +482,7 @@ pub mod example {
 
         async fn init(&mut self) -> Result<(), Error> {
             let mut request =
-                portal::inlet::Request::new(Operation::Ext(ExtOperation::Port(PortRequest {
+                inlet::Request::new(Operation::Ext(ExtOperation::Port(PortRequest {
                     port: "hello-world".to_string(),
                     entity: Entity::Empty,
                 })));
