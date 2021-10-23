@@ -62,7 +62,6 @@ pub mod id {
 
         fn from_str(s: &str) -> Result<Self, Self::Err> {
             let (leftover,segments) = parse_address(s)?;
-            let segments = segments.iter().map( |s| s.to_string() ).collect();
             if leftover.len() != 0 {
                 Err(anyhow!(format!("could not parse entire address: '{}' leftover '{}'", s, leftover )))
             } else {
@@ -113,11 +112,11 @@ pub mod id {
         fn from_str(s: &str) -> Result<Self, Self::Err> {
             let (leftover, specific) = parse_specific(s)?;
             if leftover.len() != 0 {
-                Err(anyhow!(format!(
+                let message = format!(
                     "could not process '{}' portion of specific '{}'",
                     leftover, s
-                ))
-                    )
+                );
+                Err(anyhow!(message))
             } else {
                 Ok(specific)
             }
@@ -167,6 +166,8 @@ pub mod id {
         type Err = Error;
 
         fn from_str(s: &str) -> Result<Self, Self::Err> {
+            let string = s.to_string();
+            let s: &'static str = string.as_str();
             let (remaining, version) = parse_version(s)?;
             if remaining.len() > 0 {
                 Err(anyhow!(format!(
