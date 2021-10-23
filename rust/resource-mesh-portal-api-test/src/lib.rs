@@ -4,8 +4,20 @@ extern crate async_trait;
 #[macro_use]
 extern crate anyhow;
 
+#[macro_use]
+extern crate lazy_static;
+
+
 #[cfg(test)]
 mod tests {
+
+lazy_static! {
+    static ref GLOBAL_TX : tokio::sync::broadcast::Sender<GlobalEvent> = {
+        tokio::sync::broadcast::channel(128).0
+    };
+
+}
+
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
@@ -17,15 +29,15 @@ mod tests {
     use resource_mesh_portal_api_client::{InletApi, PortalCtrl, PortalSkel, client, PortCtrl};
     use resource_mesh_portal_api_server::{Message, MuxCall, Portal, PortalMuxer, Router};
     use resource_mesh_portal_serde::version::v0_0_1::config::{Config, Info, PortalKind};
-    use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::{
+    use resource_mesh_portal_serde::version::v0_0_1::portal::inlet::resource::{
         Operation, ResourceOperation, Selector,
     };
-    use resource_mesh_portal_serde::version::v0_0_1::mesh::outlet::Response;
+    use resource_mesh_portal_serde::version::v0_0_1::portal::outlet::Response;
     use resource_mesh_portal_serde::version::v0_0_1::resource::{
         Archetype, ResourceEntity, ResourceStub,
     };
     use resource_mesh_portal_serde::version::v0_0_1::{
-        mesh, Entity, ExchangeKind, ExtOperation, Identifier, Log, Payload, PortRequest,
+        portal, Entity, ExchangeKind, ExtOperation, Identifier, Log, Payload, PortRequest,
         ResponseSignal, Status,
     };
     use resource_mesh_portal_tcp_client::{PortalClient, PortalTcpClient};
@@ -44,11 +56,44 @@ mod tests {
     use tokio::sync::oneshot::error::RecvError;
     use tokio::time::Duration;
 
+    #[derive(Clone)]
+    pub enum GlobalEvent {
+        Finished(String),
+        Fail(String),
+        Shutdown
+    }
+
     #[tokio::test]
     async fn server_up() -> Result<(), Error> {
         let port = 32355;
         let server = PortalTcpServer::new(port, Box::new(TestPortalServer::new()));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+        {
+            let server = server.clone();
+            tokio::spawn(async move {
+                let mut finished_count = 0;
+                let mut GLOBAL_RX = GLOBAL_TX.subscribe();
+                while let Result::Ok(event) = GLOBAL_RX.recv().await {
+                    match event {
+                        GlobalEvent::Finished(_) => {
+                            finished_count = finished_count+1;
+                        }
+                        GlobalEvent::Fail(_) => {
+                            finished_count = finished_count+1;
+                        }
+                        GlobalEvent::Shutdown => {
+                            server.send( Call::Shutdown ).await.unwrap_or_default();
+                            return;
+                        }
+                    }
+                    if finished_count >= 2 {
+                       server.send( Call::Shutdown ).await.unwrap_or_default();
+                       return;
+                    }
+                }
+            });
+        }
 
         {
             let server = server.clone();
@@ -63,9 +108,6 @@ mod tests {
                         println!("event: {}", event.to_string());
                     }
                     match event {
-                        Event::Info(_) => {
-                            server.send(Call::Shutdown).await;
-                        }
                         Event::Status(Status::Done) => {
                             shutdown_tx.send(());
                             return;
@@ -82,9 +124,16 @@ mod tests {
             });
         }
 
-        let client = Box::new(TestPortalClient::new("scott".to_string()));
+        let client1 = Box::new(TestPortalClient::new("scott".to_string()));
+        let client2 = Box::new(TestPortalClient::new("fred".to_string()));
 
-        PortalTcpClient::new(format!("localhost:{}", port), client).await?;
+        let client1 = PortalTcpClient::new(format!("localhost:{}", port), client1).await?;
+        let client2 = PortalTcpClient::new(format!("localhost:{}", port), client2).await?;
+
+        tokio::spawn( async move {
+            tokio::time::sleep( Duration::from_secs( 5 ) ).await;
+            GLOBAL_TX.send( GlobalEvent::Shutdown ).unwrap_or_default();
+        });
 
         shutdown_rx.await;
 
@@ -182,7 +231,7 @@ mod tests {
                                         {
                                             let (tx, rx) = oneshot::channel();
 
-                                            // this is clearly not an implementaiton of the Selector
+                                            // this is clearly not an implementation of the Selector
                                             // in this case it will always select everything from the Muxer
                                             fn selector(info: &Info) -> bool {
                                                 true
@@ -194,8 +243,8 @@ mod tests {
                                                 .iter()
                                                 .map(|i| ResourceStub {
                                                     id: Identifier::Address(i.address.clone()),
-                                                    key: Option::Some(i.key.clone()),
-                                                    address: Option::Some(i.address.clone()),
+                                                    key: i.key.clone(),
+                                                    address: i.address.clone(),
                                                     archetype: i.archetype.clone(),
                                                 })
                                                 .collect();
@@ -300,7 +349,7 @@ mod tests {
             // wait just a bit to make sure everyone got chance to be in the muxer
             tokio::time::sleep(Duration::from_millis(50));
 
-            let mut request = mesh::inlet::Request::new(Operation::Resource(
+            let mut request = portal::inlet::Request::new(Operation::Resource(
                 ResourceOperation::Select(Selector::new()),
             ));
             request.to.push(self.skel.info.parent.clone());
@@ -311,12 +360,12 @@ println!("FriendlyPortalCtrl::exchange...");
                     ResponseSignal::Ok(Entity::Resource(ResourceEntity::Resources(resources))) => {
 println!("FriendlyPortalCtrl::Ok");
                         for resource in resources {
-                            if resource.key.unwrap() != self.skel.info.key {
+                            if resource.key != self.skel.info.key {
                                 (self.skel.logger)(format!(
                                     "INFO: found resource: {}",
-                                    resource.address.unwrap()
+                                    resource.address
                                 ).as_str());
-                                let mut request = mesh::inlet::Request::new(Operation::Ext(
+                                let mut request = portal::inlet::Request::new(Operation::Ext(
                                     ExtOperation::Port(PortRequest {
                                         port: "greet".to_string(),
                                         entity: Entity::Payload(Payload::Text(format!(
@@ -325,6 +374,23 @@ println!("FriendlyPortalCtrl::Ok");
                                         ))),
                                     }),
                                 ));
+                                let result = self.skel.api().exchange(request).await;
+                                match result {
+                                    Ok(response) => {
+                                        match &response.signal {
+                                            ResponseSignal::Ok(Entity::Payload(Payload::Text(response))) => {
+                                                println!("got response: {}", response );
+                                                GLOBAL_TX.send(GlobalEvent::Finished(self.skel.info.owner.clone()));
+                                            }
+                                            _ => {
+                                                GLOBAL_TX.send(GlobalEvent::Fail(self.skel.info.owner.clone()));
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        GLOBAL_TX.send(GlobalEvent::Fail(self.skel.info.owner.clone()));
+                                    }
+                                }
                             }
                         }
                     }

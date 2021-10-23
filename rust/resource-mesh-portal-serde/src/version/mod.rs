@@ -7,6 +7,7 @@ use anyhow::Error;
 use nom::IResult;
 
 pub mod v0_0_1;
+pub mod latest;
 
 lazy_static! {
   pub static ref VERSION_RANGE: VersionRange = VersionRange { min: Version{
@@ -139,7 +140,7 @@ pub struct VersionNegotiator {
 }
 
 impl VersionNegotiator {
-    pub fn negotiate( &self, range: String ) -> Result<Box<dyn VersionMigration<v0_0_1::mesh::outlet::Frame>>,Error> {
+    pub fn negotiate( &self, range: String ) -> Result<Box<dyn VersionMigration<v0_0_1::portal::outlet::Frame>>,Error> {
         Err(anyhow!("blah"))
     }
 }
@@ -153,8 +154,8 @@ pub trait VersionMigration<FRAME> {
 pub struct IdentityVersionMigration {
 }
 
-impl VersionMigration<v0_0_1::mesh::outlet::Frame> for IdentityVersionMigration {
-    fn migrate(&self, frame: v0_0_1::mesh::outlet::Frame) -> Option<Result<Vec<u8>,Error>> {
+impl VersionMigration<v0_0_1::portal::outlet::Frame> for IdentityVersionMigration {
+    fn migrate(&self, frame: v0_0_1::portal::outlet::Frame) -> Option<Result<Vec<u8>,Error>> {
         let result = bincode::serialize(&frame);
         match result {
             Ok(data) => {
