@@ -1,3 +1,5 @@
+mod parse;
+
 use std::collections::HashMap;
 use std::convert::From;
 use std::convert::TryInto;
@@ -19,10 +21,13 @@ pub type Port=String;
 pub mod id {
     use crate::version::v0_0_1::generic;
     use serde::{Serialize,Deserialize};
+    use std::str::FromStr;
+    use anyhow::Error;
+    use crate::version::v0_0_1::parse::{parse_specific, parse_address, parse_version};
 
     pub type Key = String;
-    pub type Address = String;
     pub type Kind = String;
+    pub type ResourceType = String;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum IdentifierKind {
@@ -32,6 +37,149 @@ pub mod id {
 
     pub type Identifier = generic::id::Identifier<Key,Address>;
     pub type Identifiers = generic::id::Identifiers<Key,Address>;
+
+
+    #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq,Hash)]
+    pub struct Address {
+        segments: Vec<String>
+    }
+
+    impl Address {
+        pub fn parent(&self) -> Option<Address> {
+            if self.segments.is_empty() {
+                return Option::None;
+            }
+            let mut segments = self.segments.clone();
+            segments.remove( segments.len() );
+            Option::Some( Self {
+                segments
+            })
+        }
+    }
+
+    impl FromStr for Address {
+        type Err = Error;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            let (leftover,segments) = parse_address(s)?;
+            let segments = segments.iter().map( |s| s.to_string() ).collect();
+            if leftover.len() != 0 {
+                Err(anyhow!(format!("could not parse entire address: '{}' leftover '{}'", s, leftover )))
+            } else {
+                Ok(Self{
+                    segments
+                })
+            }
+        }
+    }
+
+    impl ToString for Address {
+        fn to_string(&self) -> String {
+            let mut rtn = String::new();
+            for (i, segment) in self.segments.iter().enumerate() {
+                rtn.push_str( segment.as_str() );
+                if i != self.segments.len() {
+                    rtn.push_str(":");
+                }
+            }
+            rtn.to_string()
+        }
+    }
+
+
+    #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+    pub struct Specific {
+        pub vendor: String,
+        pub product: String,
+        pub variant: String,
+        pub version: Version,
+    }
+
+    impl ToString for Specific {
+        fn to_string(&self) -> String {
+            format!(
+                "{}:{}:{}:{}",
+                self.vendor.to_string(),
+                self.product,
+                self.variant,
+                self.version.to_string()
+            )
+        }
+    }
+
+    impl FromStr for Specific {
+        type Err = Error;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            let (leftover, specific) = parse_specific(s)?;
+            if leftover.len() != 0 {
+                Err(anyhow!(format!(
+                    "could not process '{}' portion of specific '{}'",
+                    leftover, s
+                ))
+                    )
+            } else {
+                Ok(specific)
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+    pub struct Version {
+        major: usize,
+        minor: usize,
+        patch: usize,
+        release: Option<String>,
+    }
+
+    impl Version {
+        pub fn new(major: usize, minor: usize, patch: usize, release: Option<String>) -> Self {
+            Self {
+                major,
+                minor,
+                patch,
+                release,
+            }
+        }
+    }
+
+
+    impl ToString for Version {
+        fn to_string(&self) -> String {
+            match &self.release {
+                None => {
+                    format!("{}.{}.{}", self.major, self.minor, self.patch)
+                }
+                Some(release) => {
+                    format!(
+                        "{}.{}.{}-{}",
+                        self.major,
+                        self.minor,
+                        self.patch,
+                        release.to_string()
+                    )
+                }
+            }
+        }
+    }
+
+    impl FromStr for Version {
+        type Err = Error;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            let (remaining, version) = parse_version(s)?;
+            if remaining.len() > 0 {
+                Err(anyhow!(format!(
+                    "could not parse '{}' portion for version string '{}",
+                    remaining, s
+                )
+                    ))
+            } else {
+                Ok(version)
+            }
+        }
+    }
+
 }
 
 pub mod messaging {
@@ -778,4 +926,141 @@ pub mod generic {
         }
 
     }
+
+    mod fail {
+        use serde::{Deserialize, Serialize};
+        use crate::version::v0_0_1::id::Specific;
+
+
+        mod mesh {
+            use serde::{Deserialize, Serialize};
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Fail{
+                Error(String),
+                QueueOverflow
+            }
+        }
+
+        mod mechtron {
+            use serde::{Deserialize, Serialize};
+            use crate::version::v0_0_1::generic::fail::{resource, port, http};
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Fail{
+                Error(String),
+                Resource(resource::Fail),
+                Port(port::Fail),
+                Http(http::Error),
+            }
+        }
+
+        mod resource {
+            use serde::{Deserialize, Serialize};
+            use crate::version::v0_0_1::id::Address;
+            use crate::version::v0_0_1::generic::fail::{NotFound, Bad, Standard};
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Fail {
+                Create(Create),
+                Update(Update),
+                Standard(Standard)
+        }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Create{
+                AddressAlreadyInUse(String),
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Update{
+                Immutable
+            }
+        }
+
+
+
+
+        mod port {
+            use serde::{Deserialize, Serialize};
+            use crate::version::v0_0_1::generic::fail::Standard;
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub enum Fail {
+                Error(String),
+                Standard(Standard)
+            }
+        }
+
+        mod http {
+            use serde::{Deserialize, Serialize};
+            use crate::version::v0_0_1::generic::fail::Standard;
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub struct Error{
+                pub code: u32,
+                pub message: String
+            }
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub enum Standard{
+           NotFound(NotFound),
+           Bad(Bad),
+           Illegal(Illegal),
+           Wrong(Wrong),
+           Timeout(Timeout)
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct Timeout {
+            pub waited: i32,
+            pub message: String
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub enum NotFound {
+            ResourceType(String),
+            Kind(String),
+            Specific(String),
+            Address(String),
+            Key(String),
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub enum Bad {
+            ResourceType(String),
+            Kind(String),
+            Specific(String),
+            Address(String),
+            Key(String),
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub enum Identifier {
+            ResourceType,
+            Kind,
+            Specific,
+            Address,
+            Key,
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub enum Illegal{
+           Immutable
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct Wrong {
+            pub received: String,
+            pub expected: String,
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub enum Fail {
+            Mesh(mesh::Fail),
+            Resource(resource::Fail),
+            Mechtron(mechtron::Fail),
+        }
+    }
 }
+
