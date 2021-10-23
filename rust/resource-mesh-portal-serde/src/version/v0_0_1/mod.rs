@@ -18,18 +18,20 @@ pub type Artifact=Arc<Vec<u8>>;
 pub type Port=String;
 
 pub mod id {
-    pub type Key=String;
-    pub type Address=String;
-    pub type Kind=String;
+    use crate::version::v0_0_1::generic;
+
+    pub type Key = String;
+    pub type Address = String;
+    pub type Kind = String;
 
     pub enum IdentifierKind {
         Key,
         Address
     }
 
-    pub type Identifiers = generic::Identifiers<Key,Address>;
+    pub type Identifiers = generic::id::Identifiers<Key, Address>;
+    pub type Identifier = generic::id::Identifier<Key, Address>;
 }
-
 
 pub mod messaging {
     pub type ExchangeId = String;
@@ -148,7 +150,7 @@ pub mod delivery {
 
     pub type Entity = generic::delivery::Entity<Key,Address,Kind>;
     pub type ResourceEntity = generic::delivery::ResourceEntity<Key,Address,Kind>;
-    pub type ResponseSignal = generic::delivery::ResponseEntity<Key,Address,Kind>;
+    pub type ResponseEntity = generic::delivery::ResponseEntity<Key,Address,Kind>;
 }
 
 pub mod command {
@@ -367,8 +369,8 @@ pub mod portal {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseSignal, Status, CloseReason, generic, Key, Address, Kind};
-        use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseSignal, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
+        use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseEntity, Status, CloseReason, generic, Key, Address, Kind};
+        use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseEntity, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
 
         pub type Request=generic::portal::inlet::Request<Key,Address,Kind>;
         pub type Response=generic::portal::inlet::Response<Key,Address,Kind>;
@@ -383,8 +385,8 @@ pub mod portal {
         use anyhow::Error;
         use serde::{Deserialize, Serialize};
 
-        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseSignal, CloseReason, Key, Address, Kind, generic};
-        use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseSignal, BinParcel, CloseReason, PrimitiveFrame};
+        use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseEntity, CloseReason, Key, Address, Kind, generic};
+        use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseEntity, BinParcel, CloseReason, PrimitiveFrame};
 
         pub type Request=generic::portal::outlet::Request<Key,Address,Kind>;
         pub type Response=generic::portal::outlet::Response<Key,Address,Kind>;
@@ -574,8 +576,8 @@ pub mod generic {
             use anyhow::Error;
             use serde::{Deserialize, Serialize};
 
-            use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseSignal, Status, CloseReason};
-            use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseSignal, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
+            use crate::version::v0_0_1::{BinParcel, Command, ExchangeId, ExchangeKind, Identifier, Log, PrimitiveFrame, ResponseEntity, Status, CloseReason};
+            use crate::version::v0_0_1::generic::{Identifier, ExchangeKind, Generic, ResponseEntity, Log, Command, Status, BinParcel, CloseReason, PrimitiveFrame};
             use crate::version::v0_0_1::generic::portal::inlet::resource::Operation;
             use crate::version::v0_0_1::generic::delivery::ResponseEntity;
             use crate::version::v0_0_1::log::Log;
@@ -650,8 +652,8 @@ pub mod generic {
             use anyhow::Error;
             use serde::{Deserialize, Serialize};
 
-            use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseSignal, CloseReason};
-            use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseSignal, BinParcel, CloseReason, PrimitiveFrame};
+            use crate::version::v0_0_1::{BinParcel, CliId, Entity, ExchangeId, ExchangeKind, ExtOperation, Identifier, Port, PrimitiveFrame, ResponseEntity, CloseReason};
+            use crate::version::v0_0_1::generic::{Identifier, ExtOperation, ExchangeKind, Generic, ResponseEntity, BinParcel, CloseReason, PrimitiveFrame};
             use crate::version::v0_0_1::generic::config::Info;
             use crate::version::v0_0_1::frame::{CloseReason, PrimitiveFrame};
             use crate::version::v0_0_1::generic::delivery::ResponseEntity;

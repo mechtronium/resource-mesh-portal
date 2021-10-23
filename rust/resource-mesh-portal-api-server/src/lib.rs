@@ -13,11 +13,17 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::sync::mpsc::error::{SendTimeoutError, SendError};
 use uuid::Uuid;
 
-use resource_mesh_portal_serde::version::v0_0_1::{Address, ExchangeId, ExchangeKind, ExtOperation, Identifier, IdentifierKind, Identifiers, Key, Log, portal, ResponseSignal, Status, CloseReason};
-use resource_mesh_portal_serde::version::v0_0_1::config::Info;
-use resource_mesh_portal_serde::version::v0_0_1::portal::inlet::resource::Operation;
-use resource_mesh_portal_serde::version::v0_0_1::portal::outlet::Frame;
 use std::future::Future;
+use resource_mesh_portal_serde::version::latest::log::Log;
+use resource_mesh_portal_serde::version::latest::ExchangeId;
+use resource_mesh_portal_serde::version::latest::portal::{inlet, outlet};
+use resource_mesh_portal_serde::version::latest::id::{Identifier, Address, Key};
+use resource_mesh_portal_serde::version::latest::messaging::{ExchangeId, ExchangeKind};
+use resource_mesh_portal_serde::version::latest::operation::{Operation, ExtOperation};
+use resource_mesh_portal_serde::version::latest::delivery::ResponseEntity;
+use resource_mesh_portal_serde::version::latest::config::Info;
+use resource_mesh_portal_serde::version::latest::resource::Status;
+use resource_mesh_portal_serde::version::latest::frame::CloseReason;
 
 #[derive(Clone,Eq,PartialEq,Hash)]
 pub enum PortalStatus{
@@ -47,13 +53,13 @@ pub fn log( log: Log) {
 #[derive(Debug)]
 pub struct Exchange {
     pub id: ExchangeId,
-    pub tx: tokio::sync::oneshot::Sender<portal::inlet::Response>,
+    pub tx: tokio::sync::oneshot::Sender<inlet::Response>,
 }
 
 #[derive(Debug)]
 enum PortalCall {
-    FrameIn(portal::inlet::Frame),
-    FrameOut(portal::outlet::Frame),
+    FrameIn(inlet::Frame),
+    FrameOut(outlet::Frame),
     Exchange(Exchange)
 }
 
@@ -98,7 +104,7 @@ impl TryInto<Request<ExtOperation>> for Request<Operation> {
 }
 
 impl Request<Operation> {
-    pub fn from(request: portal::inlet::Request, from: Identifier, to: Identifier ) -> Self {
+    pub fn from(request: inlet::Request, from: Identifier, to: Identifier ) -> Self {
         Self{
             to,
             from,
@@ -108,9 +114,9 @@ impl Request<Operation> {
     }
 }
 
-impl Into<portal::inlet::Request> for Request<Operation> {
-    fn into(self) -> portal::inlet::Request {
-        portal::inlet::Request {
+impl Into<inlet::Request> for Request<Operation> {
+    fn into(self) -> inlet::Request {
+        inlet::Request {
             to: vec![self.to],
             operation: self.operation,
             kind: self.kind
@@ -118,9 +124,9 @@ impl Into<portal::inlet::Request> for Request<Operation> {
     }
 }
 
-impl Into<portal::outlet::Request> for Request<ExtOperation> {
-    fn into(self) -> portal::outlet::Request {
-        portal::outlet::Request {
+impl Into<outlet::Request> for Request<ExtOperation> {
+    fn into(self) -> outlet::Request {
+        outlet::Request {
             from: self.from,
             operation: self.operation,
             kind: self.kind
@@ -133,11 +139,11 @@ pub struct Response {
    pub to: Identifier,
    pub from: Identifier,
    pub exchange_id: ExchangeId,
-   pub signal: ResponseSignal
+   pub signal: ResponseEntity
 }
 
 impl Response {
-    pub fn from(response: portal::outlet::Response, from: Identifier, to: Identifier ) -> Self {
+    pub fn from(response: outlet::Response, from: Identifier, to: Identifier ) -> Self {
         Self{
             to,
             from,
@@ -147,9 +153,9 @@ impl Response {
     }
 }
 
-impl Into<portal::inlet::Response> for Response {
-    fn into(self) -> portal::inlet::Response {
-        portal::inlet::Response {
+impl Into<inlet::Response> for Response {
+    fn into(self) -> inlet::Response {
+        inlet::Response {
             to: self.to,
             exchange_id: self.exchange_id,
             signal: self.signal
@@ -157,9 +163,9 @@ impl Into<portal::inlet::Response> for Response {
     }
 }
 
-impl Into<portal::outlet::Response> for Response {
-    fn into(self) -> portal::outlet::Response {
-        portal::outlet::Response {
+impl Into<outlet::Response> for Response {
+    fn into(self) -> outlet::Response {
+        outlet::Response {
             from: self.from,
             exchange_id: self.exchange_id,
             signal: self.signal
@@ -169,7 +175,7 @@ impl Into<portal::outlet::Response> for Response {
 
 pub struct Portal {
     pub info: Info,
-    outlet_tx: mpsc::Sender<portal::outlet::Frame>,
+    outlet_tx: mpsc::Sender<outlet::Frame>,
     mux_tx: mpsc::Sender<MuxCall>,
     pub log: fn(log:Log),
     status_tx: tokio::sync::broadcast::Sender<Status>,
@@ -187,7 +193,7 @@ impl Portal {
         self.status.clone()
     }
 
-    pub fn new(info: Info, outlet_tx: mpsc::Sender<portal::outlet::Frame>, inlet_rx: mpsc::Receiver<portal::inlet::Frame>, logger: fn(log:Log) ) -> Self {
+    pub fn new(info: Info, outlet_tx: mpsc::Sender<outlet::Frame>, inlet_rx: mpsc::Receiver<inlet::Frame>, logger: fn(log:Log) ) -> Self {
 
         let (mux_tx,mux_rx) = tokio::sync::mpsc::channel(1024);
         let (status_tx,status_rx) = tokio::sync::broadcast::channel(8);
@@ -207,14 +213,14 @@ impl Portal {
         }
 
         {
-            let mut exchanges:HashMap<ExchangeId,oneshot::Sender<portal::inlet::Response>> =  HashMap::new();
+            let mut exchanges:HashMap<ExchangeId,oneshot::Sender<inlet::Response>> =  HashMap::new();
             let mux_tx= mux_tx.clone();
             let outlet_tx = outlet_tx.clone();
             let info = info.clone();
             let status_tx = status_tx.clone();
             tokio::spawn(async move {
 
-                match outlet_tx.send( portal::outlet::Frame::Init(info.clone())).await {
+                match outlet_tx.send( outlet::Frame::Init(info.clone())).await {
                     Result::Ok(_) => {}
                     Result::Err(err) => {
                         logger(Log::Fatal("FATAL: could not send Frame::Init".to_string()));
@@ -226,11 +232,11 @@ impl Portal {
                     match command {
                         PortalCall::FrameIn(frame) => {
                             match frame {
-                                portal::inlet::Frame::Log(log) => {
+                                inlet::Frame::Log(log) => {
                                     (logger)(log);
                                 }
-                                portal::inlet::Frame::Command(_) => {}
-                                portal::inlet::Frame::Request(request) => {
+                                inlet::Frame::Command(_) => {}
+                                inlet::Frame::Request(request) => {
                                     match &request.kind {
                                         ExchangeKind::None=> {
                                             logger(Log::Fatal("FATAL: received request with an invalid 'ExchangeKind::None'".to_string()))
@@ -246,12 +252,12 @@ impl Portal {
                                         }
                                         ExchangeKind::RequestResponse(exchange_id) => {
                                             if request.to.len() != 1 {
-                                                let response = portal::outlet::Response{
+                                                let response = outlet::Response{
                                                     from: Identifier::Key(info.key.clone()),
                                                     exchange_id: exchange_id.clone(),
-                                                    signal: ResponseSignal::Error("a RequestResponse message must have one and only one to recipient.".to_string())
+                                                    signal: ResponseEntity::Error("a RequestResponse message must have one and only one to recipient.".to_string())
                                                 };
-                                                let result = outlet_tx.send_timeout(portal::outlet::Frame::Response(response), Duration::from_secs(info.config.frame_timeout.clone()) ).await;
+                                                let result = outlet_tx.send_timeout(outlet::Frame::Response(response), Duration::from_secs(info.config.frame_timeout.clone()) ).await;
                                                 if let Result::Err(_err) = result {
                                                     logger(Log::Fatal("FATAL: frame timeout error exit_tx".to_string()));
                                                 }
@@ -267,7 +273,7 @@ impl Portal {
                                     }
 
                                 }
-                                portal::inlet::Frame::Response(response) => {
+                                inlet::Frame::Response(response) => {
                                     match exchanges.remove( &response.exchange_id ) {
                                         None => {
                                             logger(Log::Fatal(format!("FATAL: missing request/response exchange id '{}'", response.exchange_id)));
@@ -278,11 +284,11 @@ impl Portal {
                                         }
                                     }
                                 }
-                                portal::inlet::Frame::BinParcel(_) => {}
-                                portal::inlet::Frame::Status(status) => {
+                                inlet::Frame::BinParcel(_) => {}
+                                inlet::Frame::Status(status) => {
                                     status_tx.send(status).unwrap_or_default();
                                 }
-                                portal::inlet::Frame::Close(_) => {}
+                                inlet::Frame::Close(_) => {}
                             }
                         }
                         PortalCall::Exchange(exchange) => {
@@ -315,12 +321,12 @@ impl Portal {
         }
     }
 
-    pub async fn send(&self, frame: portal::outlet::Frame ) -> Result<(), Error> {
+    pub async fn send(&self, frame: outlet::Frame ) -> Result<(), Error> {
         self.outlet_tx.send_timeout(frame, Duration::from_secs( self.info.config.frame_timeout.clone() ) ).await?;
         Ok(())
     }
 
-    pub async fn exchange(&self, request: portal::outlet::Request ) -> Result<portal::inlet::Response, Error> {
+    pub async fn exchange(&self, request: outlet::Request ) -> Result<inlet::Response, Error> {
         let mut request = request;
         let exchange_id: ExchangeId = Uuid::new_v4().to_string();
         request.kind = ExchangeKind::RequestResponse(exchange_id.clone());
@@ -336,7 +342,7 @@ impl Portal {
 
 
     pub fn shutdown(&mut self) {
-        self.outlet_tx.try_send(portal::outlet::Frame::Close(CloseReason::Done)).unwrap_or(());
+        self.outlet_tx.try_send(outlet::Frame::Close(CloseReason::Done)).unwrap_or(());
     }
 
     pub async fn init(&mut self) -> Result<(), Error> {
@@ -347,7 +353,7 @@ impl Portal {
 
         self.status = PortalStatus::Initializing;
 
-        self.outlet_tx.try_send(portal::outlet::Frame::Init(self.info.clone()) )?;
+        self.outlet_tx.try_send(outlet::Frame::Init(self.info.clone()) )?;
         let mut status_rx = self.status_tx.subscribe();
         let (tx,rx) = tokio::sync::oneshot::channel();
         let config = self.info.config.clone();
@@ -540,10 +546,10 @@ impl PortalMuxer {
                                 Some(portal) => {
                                     match message {
                                         Message::Request(request) => {
-                                            portal.call_tx.try_send( PortalCall::FrameOut( portal::outlet::Frame::Request(request.into())));
+                                            portal.call_tx.try_send( PortalCall::FrameOut( outlet::Frame::Request(request.into())));
                                         }
                                         Message::Response(response) => {
-                                            portal.call_tx.try_send( PortalCall::FrameOut( portal::outlet::Frame::Response(response.into())));
+                                            portal.call_tx.try_send( PortalCall::FrameOut( outlet::Frame::Response(response.into())));
                                         }
                                     }
                                 }
