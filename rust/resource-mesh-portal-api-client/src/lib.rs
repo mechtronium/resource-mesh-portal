@@ -24,16 +24,22 @@ use std::collections::HashMap;
 use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::Response;
 use tokio::sync::watch::Receiver;
 use client::{Request,RequestContext};
+use resource_mesh_portal_serde::std_logger;
 
+
+
+struct EmptySkel {
+
+}
 
 #[async_trait]
-pub trait PortalCtrl : Sync+Send {
+pub trait PortalCtrl: Sync+Send {
     async fn init(&mut self) -> Result<(), Error>
     {
         Ok(())
     }
 
-    fn ports(&self) -> HashMap<String,fn( request: Request<PortRequest> ) -> Result<Option<ResponseSignal>,Error>> {
+    fn ports(&self) -> HashMap<String,Box<dyn PortCtrl>> {
         HashMap::new()
     }
 
@@ -47,12 +53,21 @@ pub trait PortalCtrl : Sync+Send {
     }
 }
 
+
+#[async_trait]
+pub trait PortCtrl: Sync+Send {
+    async fn request( &self, request: Request<PortRequest> ) -> Result<Option<ResponseSignal>,Error>{
+        Ok(Option::None)
+    }
+}
+
+
 pub fn log(message: &str) {
     println!("{}",message);
 }
 
 pub trait Inlet: Sync+Send {
-    fn send(&self, frame: mesh::inlet::Frame);
+    fn send_frame(&self, frame: mesh::inlet::Frame);
 }
 
 pub trait Outlet: Sync+Send {
@@ -71,12 +86,17 @@ impl StatusChamber{
     }
 }
 
+pub type Exchanges = Arc<DashMap<ExchangeId, oneshot::Sender<mesh::outlet::Response>>>;
+pub type PortalStatus = Arc<RwLock<StatusChamber>>;
+
+
+#[derive(Clone)]
 pub struct PortalSkel {
     pub info: Info,
-    pub inlet: Box<dyn Inlet>,
+    pub inlet: Arc<dyn Inlet>,
     pub logger: fn(message: &str),
-    pub exchanges: DashMap<ExchangeId, oneshot::Sender<mesh::outlet::Response>>,
-    pub status: RwLock<StatusChamber>,
+    pub exchanges: Exchanges,
+    pub status: PortalStatus
 }
 
 impl PortalSkel {
@@ -88,48 +108,49 @@ impl PortalSkel {
         {
             self.status.write().expect("expected to get status write lock").status = status.clone();
         }
-        self.inlet.send(mesh::inlet::Frame::Status(status));
+        self.inlet.send_frame(mesh::inlet::Frame::Status(status));
+    }
+
+    pub fn api(&self) -> InletApi {
+        InletApi::new( self.info.clone(), self.inlet.clone(), self.exchanges.clone(), std_logger )
     }
 
 }
 
 
 pub struct Portal {
-    pub skel: Arc<PortalSkel>,
+    pub skel: PortalSkel,
     pub ctrl: Arc<dyn PortalCtrl>,
-    pub inlet_api: Arc<InletApi>,
-    pub ports: HashMap<String,fn( request: Request<PortRequest> ) -> Result<Option<ResponseSignal>,Error>>,
+    pub ports: Arc<HashMap<String,Box<dyn PortCtrl>>>,
 }
 
 impl Portal {
     pub async fn new(
         info: Info,
         inlet: Box<dyn Inlet>,
-        ctrl_factory: fn(skel: Arc<PortalSkel>, portal: InletApi) -> Box<dyn PortalCtrl>,
-        logger: fn(message: &str),
+        ctrl_factory: fn(skel: PortalSkel) -> Box<dyn PortalCtrl>,
+        logger: fn(message: &str)
     ) -> Result<Arc<Portal>, Error> {
 
-        let status = RwLock::new(StatusChamber::new( Status::Initializing ));
-        inlet.send(mesh::inlet::Frame::Status(Status::Initializing));
-        let exchanges = DashMap::new();
-        let skel = Arc::new( PortalSkel {
+        let inlet :Arc<dyn Inlet>= inlet.into();
+        let status = Arc::new(RwLock::new(StatusChamber::new( Status::Initializing )));
+        inlet.send_frame(mesh::inlet::Frame::Status(Status::Initializing));
+        let exchanges = Arc::new(DashMap::new());
+        let skel =  PortalSkel {
             info: info.clone(),
             inlet,
             logger,
             exchanges,
             status
-        });
+        };
 
-        let inlet_api = InletApi::new(skel.clone() );
-        let mut ctrl = ctrl_factory(skel.clone(), inlet_api);
-        let ports = ctrl.ports();
+        let mut ctrl = ctrl_factory(skel.clone());
+        let ports = Arc::new(ctrl.ports());
         ctrl.init().await?;
         let ctrl = ctrl.into();
-        let inlet_api = Arc::new(InletApi::new(skel.clone() ));
         let portal = Self {
             skel: skel.clone(),
             ctrl,
-            inlet_api,
             ports
         };
 
@@ -137,7 +158,7 @@ impl Portal {
     }
 
     pub fn log( &self, log: Log ) {
-        self.skel.inlet.send(mesh::inlet::Frame::Log(log));
+        self.skel.inlet.send_frame(mesh::inlet::Frame::Log(log));
     }
 
 }
@@ -150,7 +171,7 @@ impl Outlet for Portal {
                 Frame::CommandEvent(_) => {}
                 Frame::Request(request) => {
                     let ctrl = self.ctrl.clone();
-                    let inlet_api = self.inlet_api.clone();
+                    let inlet_api = self.skel.api();
                     let skel = self.skel.clone();
                     let context = RequestContext::new(skel.info.clone(), skel.logger );
                     let ports = self.ports.clone();
@@ -201,7 +222,7 @@ impl Outlet for Portal {
                                         match result {
                                             Ok(request) => {
                                                 let request_from = request.from.clone();
-                                                let result = (*port)(request);
+                                                let result = port.request(request).await;
                                                 match result {
                                                     Ok(response) => {
                                                         match response {
@@ -307,35 +328,33 @@ impl Outlet for Portal {
     }
 }
 
+
 pub struct InletApi {
-    skel: Arc<PortalSkel>,
+    info: Info,
+    inlet: Arc<dyn Inlet>,
+    exchanges: Exchanges,
+    logger: fn( log: Log )
 }
 
 impl InletApi {
-    pub fn new(skel: Arc<PortalSkel> ) -> Self {
+    pub fn new(info: Info, inlet: Arc<dyn Inlet>, exchanges: Exchanges, logger: fn( log: Log ) ) -> Self {
         Self {
-            skel
+            info,
+            inlet,
+            exchanges,
+            logger
         }
     }
-
-    pub fn log( &self, log: Log ) {
-        self.skel.inlet.send(mesh::inlet::Frame::Log(log));
-    }
-
-    pub fn info(&self) -> Info {
-        self.skel.info.clone()
-    }
-
 
 
     pub fn notify(&self, request: mesh::inlet::Request) {
         let mut request = request;
         if let ExchangeKind::None = request.kind {
         } else {
-            self.log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string()));
+            (self.logger)(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string()));
         }
         request.kind = ExchangeKind::Notification;
-        self.skel.inlet.send(mesh::inlet::Frame::Request(request));
+        self.inlet.send_frame(mesh::inlet::Frame::Request(request));
     }
 
     pub async fn exchange(
@@ -344,21 +363,21 @@ impl InletApi {
     ) -> Result<mesh::outlet::Response, Error> {
         if let ExchangeKind::None = request.kind {
         } else {
-            self.skel.inlet.send(mesh::inlet::Frame::Log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
+            self.inlet.send_frame(mesh::inlet::Frame::Log(Log::Warn("ExchangeKind is replaced in 'notify' or 'exchange' method and should be preset to ExchangeKind::None".to_string())));
         }
         let mut request = request;
         let exchange_id: ExchangeId = Uuid::new_v4().to_string();
         request.kind = ExchangeKind::RequestResponse(exchange_id.clone());
         let (tx,rx) = oneshot::channel();
-        self.skel.exchanges.insert(exchange_id, tx);
-        self.skel.inlet.send(mesh::inlet::Frame::Request(request));
+        self.exchanges.insert(exchange_id, tx);
+        self.inlet.send_frame(mesh::inlet::Frame::Request(request));
 
-        let result = tokio::time::timeout(Duration::from_secs(self.skel.info.config.response_timeout.clone()),rx).await;
+        let result = tokio::time::timeout(Duration::from_secs(self.info.config.response_timeout.clone()),rx).await;
         Ok(result??)
     }
 
     pub fn respond( &self, response: mesh::inlet::Response ) {
-        self.skel.inlet.send( mesh::inlet::Frame::Response(response) );
+        self.inlet.send_frame( mesh::inlet::Frame::Response(response) );
     }
 }
 
@@ -463,7 +482,7 @@ pub mod example {
                 })));
 
             // send this request to itself
-            request.to.push( Identifier::Key(self.inlet_api.skel.info.key.clone()) );
+            request.to.push( Identifier::Key(self.inlet_api.info.key.clone()) );
 
             let response = self.inlet_api.exchange(request).await?;
 

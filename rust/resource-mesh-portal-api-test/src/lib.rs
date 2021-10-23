@@ -14,7 +14,7 @@ mod tests {
     use tokio::sync::{mpsc, oneshot};
 
     use anyhow::Error;
-    use resource_mesh_portal_api_client::{InletApi, PortalCtrl, PortalSkel, client};
+    use resource_mesh_portal_api_client::{InletApi, PortalCtrl, PortalSkel, client, PortCtrl};
     use resource_mesh_portal_api_server::{Message, MuxCall, Portal, PortalMuxer, Router};
     use resource_mesh_portal_serde::version::v0_0_1::config::{Config, Info, PortalKind};
     use resource_mesh_portal_serde::version::v0_0_1::mesh::inlet::resource::{
@@ -273,7 +273,7 @@ mod tests {
             Ok(())
         }
 
-        fn portal_ctrl_factory(&self) -> fn(Arc<PortalSkel>, InletApi) -> Box<dyn PortalCtrl> {
+        fn portal_ctrl_factory(&self) -> fn(PortalSkel) -> Box<dyn PortalCtrl> {
             return friendly_portal_ctrl_factory;
         }
 
@@ -285,13 +285,12 @@ mod tests {
         }
     }
 
-    fn friendly_portal_ctrl_factory(skel: Arc<PortalSkel>, inlet: InletApi) -> Box<dyn PortalCtrl> {
-        Box::new(FriendlyPortalCtrl { skel, inlet })
+    fn friendly_portal_ctrl_factory(skel: PortalSkel) -> Box<dyn PortalCtrl> {
+        Box::new(FriendlyPortalCtrl { skel })
     }
 
     pub struct FriendlyPortalCtrl {
-        pub skel: Arc<PortalSkel>,
-        pub inlet: InletApi,
+        pub skel: PortalSkel
     }
 
     #[async_trait]
@@ -306,9 +305,11 @@ mod tests {
             ));
             request.to.push(self.skel.info.parent.clone());
 
-            match self.inlet.exchange(request).await {
+println!("FriendlyPortalCtrl::exchange...");
+            match self.skel.api().exchange(request).await {
                 Ok(response) => match response.signal {
                     ResponseSignal::Ok(Entity::Resource(ResourceEntity::Resources(resources))) => {
+println!("FriendlyPortalCtrl::Ok");
                         for resource in resources {
                             if resource.key.unwrap() != self.skel.info.key {
                                 (self.skel.logger)(format!(
@@ -335,9 +336,42 @@ mod tests {
             Ok(())
         }
 
+        fn ports(&self) -> HashMap<String,Box<dyn PortCtrl>> {
+
+            struct GreetPort {
+                skel: PortalSkel
+            }
+
+            #[async_trait]
+            impl PortCtrl for GreetPort {
+                async fn request( &self, request: client::Request<PortRequest> ) -> Result<Option<ResponseSignal>,Error>{
+                    match &request.entity {
+                        Entity::Payload(Payload::Text(text)) => Ok(Option::Some(ResponseSignal::Ok(
+                            Entity::Payload(Payload::Text("Hello, <username>".to_string())),
+                        ))),
+                        _ => Err(anyhow!("unexpected request entity")),
+                    }
+                }
+            }
+
+            impl GreetPort {
+                pub fn new( skel: PortalSkel ) -> Self {
+                    Self {
+                        skel
+                    }
+                }
+            }
+
+            let mut ports = HashMap::new();
+            let port : Box<dyn PortCtrl> = Box::new(GreetPort::new(self.skel.clone()));
+            ports.insert( "greet".to_string(), port );
+            ports
+        }
+
+        /*
         fn ports( &self, ) -> HashMap< String, fn( request: client::Request<PortRequest>, ) -> Result<Option<ResponseSignal>, Error>> {
 
-            fn hello( request: client::Request<PortRequest> ) -> Result<Option<ResponseSignal>, Error> {
+             fn greet( request: client::Request<PortRequest>, ) -> Result<Option<ResponseSignal>, Error> {
                 match &request.entity {
                     Entity::Payload(Payload::Text(text)) => Ok(Option::Some(ResponseSignal::Ok(
                         Entity::Payload(Payload::Text("Hello, <username>".to_string())),
@@ -347,8 +381,10 @@ mod tests {
             }
 
             let mut ports = HashMap::new();
-            ports.insert("greet".to_string(), hello);
+            ports.insert("greet".to_string(), greet );
             ports
         }
+
+         */
     }
 }

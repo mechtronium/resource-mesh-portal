@@ -12,11 +12,13 @@ use resource_mesh_portal_api_client::{Portal, PortalCtrl, PortalSkel, InletApi, 
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use resource_mesh_portal_serde::version::v0_0_1::mesh;
+use resource_mesh_portal_serde::version::v0_0_1::{mesh, Log};
 use tokio::sync::mpsc::error::TrySendError;
 use resource_mesh_portal_serde::version;
 use std::thread;
 use tokio::time::Duration;
+
+
 
 pub struct PortalTcpClient {
     pub host: String,
@@ -119,7 +121,7 @@ impl PortalTcpClient {
 pub trait PortalClient: Send+Sync {
     fn flavor(&self) -> String;
     async fn auth( &self, reader: & mut PrimitiveFrameReader, writer: & mut PrimitiveFrameWriter ) -> Result<(),Error>;
-    fn portal_ctrl_factory(&self)->fn( skel: Arc<PortalSkel>, inlet_api: InletApi) -> Box<dyn PortalCtrl>;
+    fn portal_ctrl_factory(&self)->fn( skel: PortalSkel) -> Box<dyn PortalCtrl>;
     fn logger(&self) -> fn(message: &str);
 }
 
@@ -129,7 +131,7 @@ struct TcpInlet {
 }
 
 impl Inlet for TcpInlet {
-    fn send(&self, frame: mesh::inlet::Frame) {
+    fn send_frame(&self, frame: mesh::inlet::Frame) {
         match self.sender.try_send(frame)
         {
             Ok(_) => {}
