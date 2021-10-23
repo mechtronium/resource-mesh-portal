@@ -2,6 +2,7 @@
 extern crate anyhow;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::prelude::rust_2021::TryInto;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,19 +11,19 @@ use anyhow::Error;
 use futures::future::select_all;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
-use tokio::sync::mpsc::error::{SendTimeoutError, SendError};
+use tokio::sync::mpsc::error::{SendError, SendTimeoutError};
 use uuid::Uuid;
 
-use std::future::Future;
-use resource_mesh_portal_serde::version::latest::log::Log;
-use resource_mesh_portal_serde::version::latest::portal::{inlet, outlet};
-use resource_mesh_portal_serde::version::latest::id::{Identifier, Address, Key};
-use resource_mesh_portal_serde::version::latest::messaging::{ExchangeId, ExchangeKind};
-use resource_mesh_portal_serde::version::latest::operation::{Operation, ExtOperation};
-use resource_mesh_portal_serde::version::latest::delivery::ResponseEntity;
+use resource_mesh_portal_serde::message as request_message;
 use resource_mesh_portal_serde::version::latest::config::Info;
-use resource_mesh_portal_serde::version::latest::resource::Status;
+use resource_mesh_portal_serde::version::latest::delivery::ResponseEntity;
 use resource_mesh_portal_serde::version::latest::frame::CloseReason;
+use resource_mesh_portal_serde::version::latest::id::{Address, Identifier, Key};
+use resource_mesh_portal_serde::version::latest::log::Log;
+use resource_mesh_portal_serde::version::latest::messaging::{ExchangeId, ExchangeKind};
+use resource_mesh_portal_serde::version::latest::operation::{ExtOperation, Operation};
+use resource_mesh_portal_serde::version::latest::portal::{inlet, outlet};
+use resource_mesh_portal_serde::version::latest::resource::Status;
 
 #[derive(Clone,Eq,PartialEq,Hash)]
 pub enum PortalStatus{
@@ -60,116 +61,6 @@ enum PortalCall {
     FrameIn(inlet::Frame),
     FrameOut(outlet::Frame),
     Exchange(Exchange)
-}
-
-
-#[derive(Clone)]
-pub struct Request<OPERATION> {
-    pub to: Identifier,
-    pub from: Identifier,
-    pub operation: OPERATION,
-    pub kind: ExchangeKind,
-}
-
-impl <OPERATION> Request<OPERATION> {
-    pub fn new( to: Identifier, from: Identifier, operation: OPERATION ) -> Self {
-        Request {
-            to,
-            from,
-            operation,
-            kind: ExchangeKind::None
-        }
-    }
-}
-
-impl TryInto<Request<ExtOperation>> for Request<Operation> {
-    type Error = Error;
-
-    fn try_into(self) -> Result<Request<ExtOperation>, Self::Error> {
-        match self.operation {
-            Operation::Resource(_) => {
-                Err(anyhow!("cannot turn a ResourceOperation into an ExtOperation"))
-            }
-            Operation::Ext(ext) => {
-                Ok(Request{
-                    to: self.to,
-                    from: self.from,
-                    operation: ext,
-                    kind: self.kind
-                })
-            }
-        }
-    }
-}
-
-impl Request<Operation> {
-    pub fn from(request: inlet::Request, from: Identifier, to: Identifier ) -> Self {
-        Self{
-            to,
-            from,
-            operation: request.operation,
-            kind: request.kind
-        }
-    }
-}
-
-impl Into<inlet::Request> for Request<Operation> {
-    fn into(self) -> inlet::Request {
-        inlet::Request {
-            to: vec![self.to],
-            operation: self.operation,
-            kind: self.kind
-        }
-    }
-}
-
-impl Into<outlet::Request> for Request<ExtOperation> {
-    fn into(self) -> outlet::Request {
-        outlet::Request {
-            from: self.from,
-            operation: self.operation,
-            kind: self.kind
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Response {
-   pub to: Identifier,
-   pub from: Identifier,
-   pub exchange_id: ExchangeId,
-   pub signal: ResponseEntity
-}
-
-impl Response {
-    pub fn from(response: outlet::Response, from: Identifier, to: Identifier ) -> Self {
-        Self{
-            to,
-            from,
-            exchange_id: response.exchange_id,
-            signal: response.signal
-        }
-    }
-}
-
-impl Into<inlet::Response> for Response {
-    fn into(self) -> inlet::Response {
-        inlet::Response {
-            to: self.to,
-            exchange_id: self.exchange_id,
-            signal: self.signal
-        }
-    }
-}
-
-impl Into<outlet::Response> for Response {
-    fn into(self) -> outlet::Response {
-        outlet::Response {
-            from: self.from,
-            exchange_id: self.exchange_id,
-            signal: self.signal
-        }
-    }
 }
 
 pub struct Portal {
@@ -242,8 +133,8 @@ impl Portal {
                                         }
                                         ExchangeKind::Notification => {
                                             for to in &request.to {
-                                                let request = Request::from( request.clone(), Identifier::Key(info.key.clone()), to.clone() );
-                                                let result = mux_tx.send_timeout(MuxCall::MessageIn(Message::Request(request)), Duration::from_secs(info.config.frame_timeout.clone())).await;
+                                                let request = request_message::inlet::Request::from( request.clone(), Identifier::Key(info.key.clone()), to.clone() );
+                                                let result = mux_tx.send_timeout(MuxCall::MessageIn(message::inlet::Message::Request(request)), Duration::from_secs(info.config.frame_timeout.clone())).await;
                                                 if let Result::Err(_err) = result {
                                                     logger(Log::Fatal("FATAL: send timeout error request_tx".to_string()))
                                                 }
@@ -262,8 +153,8 @@ impl Portal {
                                                 }
                                             } else {
                                                 let to = request.to.first().expect("expected to identifier").clone();
-                                                let request = Request::from( request.clone(), Identifier::Key(info.key.clone()), to );
-                                                let result = mux_tx.send_timeout(MuxCall::MessageIn(Message::Request(request)), Duration::from_secs(info.config.frame_timeout.clone())).await;
+                                                let request = request_message::inlet::Request::from( request.clone(), Identifier::Key(info.key.clone()), to );
+                                                let result = mux_tx.send_timeout(MuxCall::MessageIn(message::inlet::Message::Request(request)), Duration::from_secs(info.config.frame_timeout.clone())).await;
                                                 if let Result::Err(_err) = result {
                                                     logger(Log::Fatal("FATAL: frame timeout error request_tx".to_string()));
                                                 }
@@ -429,31 +320,57 @@ pub enum MuxCall {
     Add(Portal),
     Remove(Identifier),
     Select{ selector: fn(info:&Info)->bool, tx: oneshot::Sender<Vec<Info>> },
-    MessageIn(Message<Operation>),
-    MessageOut(Message<ExtOperation>)
+    MessageIn(inlet::Message),
+    MessageOut(outlet::Message)
 }
 
-pub enum Message<OPERATION> {
-    Request(Request<OPERATION>),
-    Response(Response)
-}
+pub mod message {
 
-impl <OPERATION> Message<OPERATION> {
-    pub fn to(&self) -> Identifier {
-        match self {
-            Message::Request(request) => {
-                request.to.clone()
-            }
-            Message::Response(response) => {
-                response.to.clone()
+    pub mod inlet {
+        use resource_mesh_portal_serde::version::latest::operation::Operation;
+        use crate::message::generic;
+
+        pub type Message = generic::Message<Operation>;
+    }
+
+    pub mod outlet {
+        use resource_mesh_portal_serde::version::latest::operation::ExtOperation;
+        use crate::message::generic;
+
+        pub type Message = generic::Message<ExtOperation>;
+    }
+
+    pub mod generic {
+        use resource_mesh_portal_serde::message::generic::{Request, Response};
+        use resource_mesh_portal_serde::version::latest::id::Identifier;
+
+        pub enum Message<OPERATION> {
+            Request(Request<OPERATION>),
+            Response(Response)
+        }
+
+        impl<OPERATION> Message<OPERATION> {
+            pub fn to(&self) -> Identifier {
+                match self {
+                    Message::Request(request) => {
+                        request.to.clone()
+                    }
+                    Message::Response(response) => {
+                        response.to.clone()
+                    }
+                }
             }
         }
     }
+
 }
 
 
+
+
+
 pub trait Router: Send+Sync {
-    fn route( &self, message: Message<Operation>);
+    fn route( &self, message: inlet::Message );
     fn logger( &self, message: &str ) {
         println!("{}", message );
     }
@@ -544,10 +461,10 @@ impl PortalMuxer {
                             {
                                 Some(portal) => {
                                     match message {
-                                        Message::Request(request) => {
+                                        outlet::Message::Request(request) => {
                                             portal.call_tx.try_send( PortalCall::FrameOut( outlet::Frame::Request(request.into())));
                                         }
-                                        Message::Response(response) => {
+                                        outlet::Message::Response(response) => {
                                             portal.call_tx.try_send( PortalCall::FrameOut( outlet::Frame::Response(response.into())));
                                         }
                                     }

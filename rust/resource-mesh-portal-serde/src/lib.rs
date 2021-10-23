@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::version::latest::log::Log;
 
 pub mod version;
+pub mod message;
 
 pub fn std_logger(log: Log ) {
     match log {

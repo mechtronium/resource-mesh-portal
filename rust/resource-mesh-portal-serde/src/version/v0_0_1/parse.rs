@@ -175,14 +175,17 @@ pub fn parse_specific(input: &str) -> Res<&str, Specific> {
 
 
 
-pub fn parse_address(input: &str) -> Res<&str, Vec<&str>> {
+pub fn parse_address(input: &str) -> Res<&str, Vec<String>> {
     context(
         "address",
         separated_list1(
             nom::character::complete::char(':'),
             any_resource_path_segment
         ),
-    )(input)
+    )(input).map( |(next,segments)|{
+        let segments: Vec<String> = segments.iter().map( |s| s.to_string() ).collect();
+        (next,segments)
+    })
 }
 
 

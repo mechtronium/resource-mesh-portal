@@ -113,7 +113,7 @@ pub mod id {
             let (leftover, specific) = parse_specific(s)?;
             if leftover.len() != 0 {
                 let message = format!(
-                    "could not process '{}' portion of specific '{}'",
+                    "could not process '{}' portion of Specific '{}'",
                     leftover, s
                 );
                 Err(anyhow!(message))
